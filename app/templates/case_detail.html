@@ -1,0 +1,676 @@
+{% extends "base.html" %}
+{% block content %}
+
+{# ---------- Helper macros ---------- #}
+{% macro format_phone(num) %}
+  {%- set digits = (num or '') 
+      |replace('(', '') 
+      |replace(')', '') 
+      |replace('-', '') 
+      |replace(' ', '') 
+      |replace('.', '') 
+      |replace('+', '') -%}
+  {%- if digits|length == 10 -%}
+    ({{ digits[0:3] }}) {{ digits[3:6] }}-{{ digits[6:10] }}
+  {%- else -%}
+    {{ num }}
+  {%- endif -%}
+{% endmacro %}
+
+{% macro yn_icon(value) %}
+  {%- if value -%}
+    <span class="yn-icon yes">✓</span>
+  {%- else -%}
+    <span class="yn-icon no">✗</span>
+  {%- endif -%}
+{% endmacro %}
+
+{# ---------- NEW: numbers baseline (same logic as old working template) ---------- #}
+{% if case.arv %}
+    {% set arv = case.arv %}
+{% elif property_snapshot and property_snapshot.val_estimated_value %}
+    {% set arv = property_snapshot.val_estimated_value %}
+{% else %}
+    {% set arv = 0 %}
+{% endif %}
+
+{% set rehab   = case.rehab or 0 %}
+{% set closing = case.closing_costs or 0 %}
+{% set jsn_max_offer = (arv - rehab - closing) * 0.7 %}
+
+
+{# ---------- Top header / buttons (unchanged from working version) ---------- #}
+
+<h2>Case {{ case.case_number }}</h2>
+
+<style>
+  .sticky-actions{
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    padding: 10px 12px;
+    margin: 10px 0 14px 0;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+    display:flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    align-items:center;
+  }
+  .sticky-actions .btn{ margin:0 !important; }
+</style>
+
+
+<div class="sticky-actions">
+<a class="btn" href="/cases/{{ case.id }}/report" target="_blank"
+   style="font-size:0.85em; padding:0.4em 0.7em;">
+  Deal Calculator
+</a>
+
+{% if not (skip_trace and skip_trace.results) %}
+<form method="post" action="/cases/{{ case.id }}/skip-trace" class="js-disable-on-submit" style="display:inline;">
+  <button class="btn" type="submit"
+          style="font-size:0.85em; padding:0.4em 0.7em; margin-left:0.5rem;">
+    Skip Trace Owner
+  </button>
+</form>
+{% endif %}
+
+{% if not property_data %}
+    <form method="post" action="/cases/{{ case.id }}/property-lookup" class="js-disable-on-submit" style="display:inline;">
+      <button class="btn" type="submit" style="font-size:0.85em; padding:0.4em 0.7em; margin-left:0.5rem;">
+        Fetch Property Data
+      </button>
+    </form>
+    {% endif %}
+</div>
+
+
+<div class="tabs">
+  <button type="button" class="tab-button tab-active" data-tab="overview">Case Overview</button>
+  <button type="button" class="tab-button" data-tab="property">Property Data</button>
+</div>
+
+{# ---------- NEW: include the two tab partials ---------- #}
+
+{% include "cases/_case_overview_tab.html" %}
+
+{% include "cases/_case_property_tab.html" %}
+
+<script>
+function toggleParcelEdit(show) {
+  document.getElementById('parcelEdit').style.display = show ? '' : 'none';
+}
+function toggleAddressEdit(show) {
+  document.getElementById('addressEdit').style.display = show ? '' : 'none';
+}
+
+// ---- Outstanding Liens JS (existing) ----
+(function() {
+  const caseId = {{ case.id }};
+  const listEl = document.getElementById('liens-list');
+  const savingEl = document.getElementById('liens-saving');
+  const openBtn = document.getElementById('lien-modal-open');
+  const modal = document.getElementById('lienModal');
+  const form = document.getElementById('lienModalForm');
+  const holderInput = document.getElementById('lienHolder');
+  const amountInput = document.getElementById('lienAmount');
+  const indexInput = document.getElementById('lienIndex');
+  const closeBtn = document.getElementById('lienModalClose');
+  const cancelBtn = document.getElementById('lienModalCancel');
+
+  let liens = [];
+
+  function formatCurrency(val) {
+    let s = String(val ?? '').replace(/[^\d.]/g, '');
+    if (!s) return '$0.00';
+    const num = parseFloat(s);
+    if (isNaN(num)) return '$0.00';
+    return num.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+  }
+
+  function render() {
+    if (!listEl) return;
+    listEl.innerHTML = '';
+    if (!liens.length) {
+      const empty = document.createElement('div');
+      empty.className = 'liens-empty-hint';
+      empty.textContent = 'No liens added yet.';
+      listEl.appendChild(empty);
+      return;
+    }
+    liens.forEach((lien, idx) => {
+      const row = document.createElement('div');
+      row.className = 'lien-row';
+
+      const left = document.createElement('div');
+      left.className = 'lien-left';
+      left.textContent = lien.holder + ' – ' + formatCurrency(lien.amount);
+
+      const right = document.createElement('div');
+      right.className = 'lien-actions';
+
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.textContent = 'Edit';
+      editBtn.className = 'btn btn-small';
+      editBtn.addEventListener('click', () => openModalForEdit(idx));
+
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.textContent = 'Delete';
+      delBtn.className = 'btn btn-small btn-danger';
+      delBtn.addEventListener('click', () => {
+        liens.splice(idx, 1);
+        save();
+        render();
+      });
+
+      right.appendChild(editBtn);
+      right.appendChild(delBtn);
+      row.appendChild(left);
+      row.appendChild(right);
+      listEl.appendChild(row);
+    });
+
+    // Update summary numbers on the fly
+    updateSummaryFromLiens();
+  }
+
+  function setSaving(isSaving) {
+    if (!savingEl) return;
+    savingEl.style.display = isSaving ? 'block' : 'none';
+  }
+
+  async function load() {
+    try {
+      const resp = await fetch(`/cases/${caseId}/liens`);
+      if (!resp.ok) throw new Error('Failed to load liens');
+      const data = await resp.json();
+      liens = Array.isArray(data) ? data : [];
+      render();
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function save() {
+  setSaving(true);
+  try {
+    const resp = await fetch(`/cases/${caseId}/liens`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      // IMPORTANT: backend expects { outstanding_liens: [...] }
+      body: JSON.stringify({ outstanding_liens: liens }),
+    });
+
+    if (!resp.ok) {
+      console.error('Failed to save liens', resp.status);
+      return;
+    }
+
+    // Optional: sync local liens with what the API returns
+    const data = await resp.json();
+    liens = Array.isArray(data) ? data : [];
+    render();
+  } catch (err) {
+    console.error(err);
+  } finally {
+    setSaving(false);
+  }
+}
+
+
+  function openModalForNew() {
+    if (!modal) return;
+    indexInput.value = '';
+    holderInput.value = '';
+    amountInput.value = '';
+    modal.style.display = 'block';
+  }
+
+  function openModalForEdit(idx) {
+    if (!modal) return;
+    const lien = liens[idx];
+    indexInput.value = String(idx);
+    holderInput.value = lien.holder || '';
+    amountInput.value = lien.amount || '';
+    modal.style.display = 'block';
+  }
+
+  function closeModal() {
+    if (!modal) return;
+    modal.style.display = 'none';
+  }
+
+  function init() {
+    if (!listEl || !modal || !form) return;
+
+    openBtn && openBtn.addEventListener('click', () => openModalForNew());
+    closeBtn && closeBtn.addEventListener('click', closeModal);
+    cancelBtn && cancelBtn.addEventListener('click', closeModal);
+
+    form.addEventListener('submit', (evt) => {
+      evt.preventDefault();
+      const holder = holderInput.value.trim();
+      const amount = amountInput.value.trim();
+      if (!holder || !amount) {
+        alert('Please enter both holder and amount.');
+        return;
+      }
+      const idx = indexInput.value ? parseInt(indexInput.value, 10) : -1;
+      if (idx >= 0 && idx < liens.length) {
+        liens[idx].holder = holder;
+        liens[idx].amount = amount;
+      } else {
+        liens.push({ holder, amount });
+      }
+      modal.style.display = 'none';
+      save();
+      render();
+    });
+
+    window.addEventListener('click', (evt) => {
+      if (evt.target === modal) {
+        closeModal();
+      }
+    });
+  }
+
+  function updateSummaryFromLiens() {
+    const totalEl = document.getElementById('summary-liens-total');
+    const sellerEl = document.getElementById('summary-seller-cash');
+    const offerRawEl = document.getElementById('summary-jsn-offer-raw');
+
+    if (!totalEl && !sellerEl) return;
+
+    let total = 0;
+    if (Array.isArray(liens)) {
+      liens.forEach(l => {
+        const raw = (l.amount || '').toString().replace(/[^\d.]/g, '');
+        const num = parseFloat(raw);
+        if (!isNaN(num)) total += num;
+      });
+    }
+
+    const arv = {{ arv|float }};
+    const rehab = {{ rehab|float }};
+    const closingLocal = {{ closing|float }};
+    const jsnOffer = (arv - rehab - closingLocal) * 0.7;
+    const sellerCash = jsnOffer - total;
+
+    if (totalEl) totalEl.textContent = total.toLocaleString('en-US', { style:'currency', currency:'USD' });
+    if (offerRawEl) offerRawEl.textContent = jsnOffer.toLocaleString('en-US', { style:'currency', currency:'USD' });
+    if (sellerEl) sellerEl.textContent = sellerCash.toLocaleString('en-US', { style:'currency', currency:'USD' });
+  }
+
+  load();
+  init();
+})();
+
+// Tab switching for Case Overview / Property Data
+(function () {
+  const tabButtons = document.querySelectorAll('.tab-button');
+  const tabPanels = document.querySelectorAll('.tab-content');
+  if (!tabButtons.length || !tabPanels.length) return;
+
+  tabButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tab = btn.getAttribute('data-tab');
+      tabButtons.forEach(b => b.classList.remove('tab-active'));
+      tabPanels.forEach(p => p.classList.remove('tab-active'));
+      btn.classList.add('tab-active');
+      const panel = document.getElementById('tab-' + tab);
+      if (panel) {
+        panel.classList.add('tab-active');
+      }
+    });
+  });
+})();
+
+// Disable buttons on submit to prevent double-click disasters
+(function(){
+  const forms = document.querySelectorAll('.js-disable-on-submit');
+  forms.forEach(f => {
+    f.addEventListener('submit', () => {
+      const btn = f.querySelector('button[type="submit"]');
+      if (btn) {
+        btn.disabled = true;
+        const old = btn.textContent;
+        btn.textContent = 'Working...';
+        setTimeout(() => { btn.textContent = old; }, 15000);
+      }
+    });
+  });
+})();
+
+</script>
+
+<style>
+/* Layout */
+.addr-photo-liens {
+  display:flex;
+  gap:1.5rem;
+  margin:1rem 0 1.5rem;
+}
+.addr-photo-liens .left-col {
+  flex: 1.2;
+  min-width: 0;
+}
+.addr-photo-liens .right-col {
+  flex: 1;
+  min-width: 260px;
+}
+
+/* Address / parcel line */
+.address-line {
+  font-size:1.1rem;
+  margin-bottom:0.25rem;
+}
+.property-inline {
+  margin:0.4rem 0 0.6rem;
+  font-size:0.95rem;
+}
+.inline-edit-link {
+  font-size:0.85rem;
+  margin-left:0.5rem;
+  text-decoration:underline;
+  cursor:pointer;
+}
+
+/* Street View */
+.streetview-container {
+  border-radius:10px;
+  overflow:hidden;
+  border:1px solid #333;
+  background:#111;
+  min-height:180px;
+}
+.streetview-img {
+  width:100%;
+  display:block;
+}
+.streetview-placeholder {
+  padding:1.5rem;
+  text-align:center;
+  opacity:0.7;
+}
+
+/* Liens + numbers */
+.liens-panel {
+  background:#141414;
+  border-radius:10px;
+  padding:0.75rem 1rem;
+  margin-bottom:1rem;
+  border:1px solid #2c2c2c;
+}
+.liens-header-row {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:0.5rem;
+}
+.liens-header {
+  font-weight:600;
+  font-size:0.95rem;
+}
+.lien-link {
+  font-size:0.85rem;
+  cursor:pointer;
+  text-decoration:underline;
+  color:#8fd4ff;
+}
+.liens-empty-hint {
+  font-size:0.9rem;
+  opacity:0.7;
+}
+.lien-row {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  padding:0.35rem 0;
+  border-top:1px dashed #333;
+}
+.lien-row:first-of-type {
+  border-top:none;
+}
+.lien-left {
+  font-size:0.9rem;
+}
+.lien-actions {
+  display:flex;
+  gap:0.25rem;
+}
+.btn-small {
+  font-size:0.75rem;
+  padding:0.15rem 0.4rem;
+}
+.btn-danger {
+  background:#5a1f1f;
+}
+
+/* Numbers section */
+.numbers-section {
+  background:#121212;
+  border-radius:10px;
+  padding:0.75rem 1rem 1rem;
+  border:1px solid #2c2c2c;
+}
+.numbers-section h3 {
+  margin-top:0;
+}
+.numbers-section input[type="number"] {
+  width:100%;
+  margin-bottom:0.4rem;
+}
+
+/* Liens modal */
+.lien-modal {
+  display:none;
+  position:fixed;
+  z-index:999;
+  left:0;
+  top:0;
+  width:100%;
+  height:100%;
+  overflow:auto;
+  background:rgba(0,0,0,0.6);
+}
+.lien-modal-content {
+  background:#1c1c1c;
+  margin:10% auto;
+  padding:1rem;
+  width:95%;
+  max-width:400px;
+  border-radius:10px;
+  border:1px solid #3a3a3a;
+}
+.lien-modal-header {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:0.5rem;
+}
+.lien-close {
+  cursor:pointer;
+  font-size:1.2rem;
+}
+.lien-modal-actions {
+  display:flex;
+  justify-content:flex-end;
+  gap:0.5rem;
+  margin-top:0.75rem;
+}
+
+/* Defendants, skip trace, documents, notes */
+.defendants-section,
+.skip-trace-section,
+.documents-section,
+.notes-section {
+  margin-top:1.25rem;
+}
+.defendants-section ul,
+.notes-list {
+  list-style:none;
+  padding-left:0;
+}
+
+/* Notes */
+.notes-section .note-form textarea {
+  width:100%;
+  margin-bottom:0.5rem;
+}
+.notes-list li {
+  border-bottom:1px solid #333;
+  padding:0.3rem 0;
+}
+.note-date {
+  font-size:0.8rem;
+  opacity:0.7;
+  margin-right:0.5rem;
+}
+.note-text {
+  font-size:0.9rem;
+}
+
+/* Tabs */
+.tabs {
+  margin-top:1rem;
+}
+.tab-button {
+  padding:0.3rem 0.7rem;
+  font-size:0.9rem;
+  border:1px solid #333;
+  border-bottom:none;
+  background:#111;
+  cursor:pointer;
+  margin-right:0.4rem;
+  border-radius:6px 6px 0 0;
+}
+.tab-button.tab-active {
+  background:#1c1c1c;
+  font-weight:600;
+}
+.tab-content {
+  display:none;
+  border:1px solid #333;
+  padding:1rem;
+  border-radius:0 6px 6px 6px;
+  margin-top:-1px;
+}
+.tab-content.tab-active {
+  display:block;
+}
+
+/* Property tab cards */
+.property-tab .prop-grid {
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+  gap:1rem;
+}
+.prop-card {
+  background:#151515;
+  border-radius:10px;
+  padding:0.75rem 1rem;
+  border:1px solid #2b2b2b;
+}
+.prop-card h4 {
+  margin-top:0;
+}
+
+/* Pills for quick flags */
+.pill {
+  display:inline-block;
+  padding:0.1rem 0.4rem;
+  border-radius:999px;
+  font-size:0.75rem;
+  margin-right:0.25rem;
+  margin-bottom:0.25rem;
+}
+.pill-tag {
+  background: #1f3d2e;
+  color: #a6f3c5;
+}
+.pill-warn {
+  background: #412222;
+  color: #ffb3b3;
+}
+
+.property-error {
+  color: #ff8080;
+  font-size: 0.95rem;
+}
+.docs-notes-row {
+  display: flex;
+  gap: 1.5rem;
+  margin-top: 1.25rem;
+  align-items: flex-start;
+}
+
+.docs-notes-row .documents-section,
+.docs-notes-row .notes-section {
+  flex: 1;
+}
+
+/* Optional: stack on small screens */
+@media (max-width: 900px) {
+  .docs-notes-row {
+    flex-direction: column;
+  }
+}
+/* Skip trace */
+.skip-trace-list {
+  list-style: none;
+  padding-left: 0;
+  margin-top: 0.5rem;
+}
+.skip-trace-item {
+  padding: 4px 0;
+  border-bottom: 1px solid #eee;
+}
+.skip-phone-line,
+.skip-email-line {
+  margin-top: 2px;
+}
+
+/* Yes/No icons */
+.yn-icon {
+  font-weight: bold;
+}
+.yn-icon.yes {
+  color: #28a745; /* green check */
+}
+.yn-icon.no {
+  color: #dc3545; /* red X */
+}
+
+</style>
+
+
+<script>
+(function () {
+  function disableForm(form) {
+    const btns = form.querySelectorAll('button, input[type="submit"]');
+    btns.forEach(b => {
+      if (b.dataset.originalText === undefined && b.tagName.toLowerCase() === 'button') {
+        b.dataset.originalText = b.innerHTML;
+      }
+      b.disabled = true;
+      b.classList.add('disabled');
+      if (b.tagName.toLowerCase() === 'button') {
+        b.innerHTML = (b.dataset.loadingText || 'Working…');
+      }
+    });
+  }
+
+  document.querySelectorAll('form.js-disable-on-submit').forEach(form => {
+    form.addEventListener('submit', function () {
+      disableForm(form);
+    });
+  });
+})();
+</script>
+
+{% endblock %}
