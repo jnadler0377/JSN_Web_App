@@ -36,7 +36,23 @@
 
 {% set rehab   = case.rehab or 0 %}
 {% set closing = case.closing_costs or 0 %}
-{% set jsn_max_offer = (arv - rehab - closing) * 0.7 %}
+{% set closing_input = case.closing_costs if case.closing_costs and case.closing_costs > 0 else None %}
+{% set ov = property_overrides or {} %}
+{% set props = property_data['results']['properties'] if property_data and property_data.get('results') and property_data['results'].get('properties') else [] %}
+{% set p = props[0] if props else {} %}
+{% set listing = p.get('listing') or {} %}
+{% set general = p.get('general') or {} %}
+{% set building = p.get('building') or {} %}
+{% set prop_year = listing.get('yearBuilt') or general.get('yearBuilt') or p.get('yearBuilt') %}
+{% set prop_sqft = listing.get('totalBuildingAreaSquareFeet') or building.get('livingAreaSqft') or general.get('buildingAreaSqft') %}
+{% set rehab_year_built = ov.get('year_built') or prop_year %}
+{% set rehab_sqft = ov.get('sqft') or prop_sqft %}
+{% set wholesale_offer = [0, (arv * 0.65) - rehab - closing] | max %}
+{% if arv > 350000 %}
+  {% set flip_offer = [0, (arv * 0.85) - rehab - closing] | max %}
+{% else %}
+  {% set flip_offer = [0, (arv * 0.80) - rehab - closing] | max %}
+{% endif %}
 
 
 {# ---------- Top header / buttons (unchanged from working version) ---------- #}
@@ -48,8 +64,9 @@
     position: sticky;
     top: 0;
     z-index: 50;
-    background: #fff;
-    border: 1px solid #e5e7eb;
+    background: #000;
+    color: #fff;
+    border: 1px solid #222;
     border-radius: 12px;
     padding: 10px 12px;
     margin: 10px 0 14px 0;
@@ -60,6 +77,7 @@
     align-items:center;
   }
   .sticky-actions .btn{ margin:0 !important; }
+  .sticky-actions a{ color:#fff; }
 </style>
 
 
@@ -87,6 +105,25 @@
     {% endif %}
 </div>
 
+{% set pinellas_url = pinellas_appraiser_url(case.parcel_id) if case.parcel_id else None %}
+{% if pinellas_url %}
+  <div class="pasco-links">
+    <a href="{{ pinellas_url }}" target="_blank" rel="noopener">Pinellas Property Appraiser</a>
+    <span class="pasco-links-divider">|</span>
+    <a href="https://officialrecords.mypinellasclerk.gov/" target="_blank" rel="noopener">Pinellas Official Records</a>
+    <span class="pasco-links-divider">|</span>
+    <a href="https://courtrecords.mypinellasclerk.gov/" target="_blank" rel="noopener">Pinellas Clerk of Court</a>
+  </div>
+{% elif case.parcel_id %}
+  <div class="pasco-links">
+    <a href="{{ pasco_appraiser_url(case.parcel_id) }}" target="_blank" rel="noopener">Pasco Appraiser</a>
+    <span class="pasco-links-divider">|</span>
+    <a href="https://app.pascoclerk.com/appdot-public-online-services-forms-or-search.asp" target="_blank" rel="noopener">Pasco Official Records</a>
+    <span class="pasco-links-divider">|</span>
+    <a href="https://www.civitekflorida.com/ocrs/county/51/" target="_blank" rel="noopener">Pasco Clerk of Court</a>
+  </div>
+{% endif %}
+
 
 <div class="tabs">
   <button type="button" class="tab-button tab-active" data-tab="overview">Case Overview</button>
@@ -105,6 +142,12 @@ function toggleParcelEdit(show) {
 }
 function toggleAddressEdit(show) {
   document.getElementById('addressEdit').style.display = show ? '' : 'none';
+}
+function togglePropertyEdit(show) {
+  const el = document.getElementById('propertyEdit');
+  if (el) {
+    el.style.display = show ? '' : 'none';
+  }
 }
 
 // ---- Outstanding Liens JS (existing) ----
@@ -282,7 +325,8 @@ function toggleAddressEdit(show) {
   function updateSummaryFromLiens() {
     const totalEl = document.getElementById('summary-liens-total');
     const sellerEl = document.getElementById('summary-seller-cash');
-    const offerRawEl = document.getElementById('summary-jsn-offer-raw');
+    const wholesaleEl = document.getElementById('summary-wholesale-offer-raw');
+    const flipEl = document.getElementById('summary-flip-offer-raw');
 
     if (!totalEl && !sellerEl) return;
 
@@ -298,11 +342,14 @@ function toggleAddressEdit(show) {
     const arv = {{ arv|float }};
     const rehab = {{ rehab|float }};
     const closingLocal = {{ closing|float }};
-    const jsnOffer = (arv - rehab - closingLocal) * 0.7;
-    const sellerCash = jsnOffer - total;
+    const wholesaleOffer = Math.max(0, (arv * 0.65) - rehab - closingLocal);
+    const flipRate = arv > 350000 ? 0.85 : 0.80;
+    const flipOffer = Math.max(0, (arv * flipRate) - rehab - closingLocal);
+    const sellerCash = Math.max(0, wholesaleOffer - total);
 
     if (totalEl) totalEl.textContent = total.toLocaleString('en-US', { style:'currency', currency:'USD' });
-    if (offerRawEl) offerRawEl.textContent = jsnOffer.toLocaleString('en-US', { style:'currency', currency:'USD' });
+    if (wholesaleEl) wholesaleEl.textContent = wholesaleOffer.toLocaleString('en-US', { style:'currency', currency:'USD' });
+    if (flipEl) flipEl.textContent = flipOffer.toLocaleString('en-US', { style:'currency', currency:'USD' });
     if (sellerEl) sellerEl.textContent = sellerCash.toLocaleString('en-US', { style:'currency', currency:'USD' });
   }
 
@@ -328,6 +375,78 @@ function toggleAddressEdit(show) {
       }
     });
   });
+})();
+
+// Update rehab placeholder when condition changes (case overview tab)
+(function () {
+  const rehabInput = document.getElementById('rehab-input');
+  if (!rehabInput) return;
+  const conditionInputs = document.querySelectorAll('input[name="rehab_condition"]');
+  const yearInput = document.querySelector('#propertyEdit input[name="year_built"]');
+  const sqftInput = document.querySelector('#propertyEdit input[name="sqft"]');
+
+  function toFloat(val) {
+    if (val === null || val === undefined) return null;
+    const s = String(val).replace(/[^0-9.]/g, '').trim();
+    if (!s) return null;
+    const num = parseFloat(s);
+    return Number.isNaN(num) ? null : num;
+  }
+
+  function currentCondition() {
+    const checked = document.querySelector('input[name="rehab_condition"]:checked');
+    return checked ? checked.value : 'Good';
+  }
+
+  function estimateRehab() {
+    const year =
+      toFloat(yearInput && yearInput.value) ?? toFloat(rehabInput.dataset.yearBuilt);
+    const sqft =
+      toFloat(sqftInput && sqftInput.value) ?? toFloat(rehabInput.dataset.sqft);
+    if (!year || !sqft || sqft <= 0) {
+      return;
+    }
+
+    let base = 20.0;
+    if (year < 1960) base = 50.0;
+    else if (year <= 1989) base = 40.0;
+    else if (year <= 2009) base = 35.0;
+    else if (year <= 2020) base = 30.0;
+    else base = 20.0;
+
+    const mults = { poor: 1.0, fair: 0.75, good: 0.60, excellent: 0.50 };
+    const cond = currentCondition().toLowerCase();
+    const mult = mults[cond] ?? 0.60;
+
+    let estimate = base * sqft * mult;
+    estimate = Math.max(12000, Math.min(120000, estimate));
+    rehabInput.placeholder = `Suggested Rehab $${estimate.toFixed(2)}`;
+  }
+
+  conditionInputs.forEach((el) => el.addEventListener('change', estimateRehab));
+  if (yearInput) yearInput.addEventListener('input', estimateRehab);
+  if (sqftInput) sqftInput.addEventListener('input', estimateRehab);
+  estimateRehab();
+})();
+
+// Update closing costs placeholder when ARV changes (case overview tab)
+(function () {
+  const arvInput = document.getElementById('arv-input');
+  const closingInput = document.getElementById('closing-costs-input');
+  if (!arvInput || !closingInput) return;
+
+  function updateClosingPlaceholder() {
+    const val = parseFloat(arvInput.value || '0');
+    if (!val || isNaN(val)) {
+      closingInput.placeholder = 'Suggested Closing Costs $0.00';
+      return;
+    }
+    const suggested = (val * 0.015).toFixed(2);
+    closingInput.placeholder = `Suggested Closing Costs $${suggested}`;
+  }
+
+  arvInput.addEventListener('input', updateClosingPlaceholder);
+  updateClosingPlaceholder();
 })();
 
 // Disable buttons on submit to prevent double-click disasters
@@ -465,6 +584,28 @@ function toggleAddressEdit(show) {
   width:100%;
   margin-bottom:0.4rem;
 }
+.numbers-section select {
+  width:100%;
+  margin-bottom:0.4rem;
+  background:#121212;
+  color:#eaeaea;
+  border:1px solid #2c2c2c;
+}
+.condition-group {
+  display:flex;
+  gap:0.6rem;
+  flex-wrap:wrap;
+  margin:0.2rem 0 0.6rem;
+}
+.condition-option {
+  display:flex;
+  align-items:center;
+  gap:0.35rem;
+  font-size:0.9rem;
+}
+.condition-option input[type="radio"] {
+  accent-color:#8fd4ff;
+}
 
 /* Liens modal */
 .lien-modal {
@@ -526,14 +667,40 @@ function toggleAddressEdit(show) {
   border-bottom:1px solid #333;
   padding:0.3rem 0;
 }
-.note-date {
-  font-size:0.8rem;
-  opacity:0.7;
-  margin-right:0.5rem;
-}
-.note-text {
-  font-size:0.9rem;
-}
+  .note-date {
+    font-size:0.8rem;
+    opacity:0.7;
+    margin-right:0.5rem;
+  }
+  .note-delete {
+    font-size:0.8rem;
+    opacity:0.7;
+    margin-right:0.5rem;
+    color:#b8c0c7;
+    text-decoration:none;
+  }
+  .note-delete:hover {
+    opacity:0.9;
+    text-decoration:underline;
+  }
+  .note-text {
+    font-size:0.9rem;
+  }
+  .pasco-links {
+    margin: 6px 0 14px 0;
+    font-size: 0.9rem;
+  }
+  .pasco-links a {
+    color: var(--acc);
+    text-decoration: none;
+  }
+  .pasco-links a:hover {
+    text-decoration: underline;
+  }
+  .pasco-links-divider {
+    margin: 0 6px;
+    color: #6c6c6c;
+  }
 
 /* Tabs */
 .tabs {
@@ -544,13 +711,15 @@ function toggleAddressEdit(show) {
   font-size:0.9rem;
   border:1px solid #333;
   border-bottom:none;
-  background:#111;
+  background:#1b1b1b;
+  color:#eaeaea;
   cursor:pointer;
   margin-right:0.4rem;
   border-radius:6px 6px 0 0;
 }
 .tab-button.tab-active {
-  background:#1c1c1c;
+  background:#2b2b2b;
+  color:#fff;
   font-weight:600;
 }
 .tab-content {
@@ -559,6 +728,8 @@ function toggleAddressEdit(show) {
   padding:1rem;
   border-radius:0 6px 6px 6px;
   margin-top:-1px;
+  background:#0f0f0f;
+  color:#eaeaea;
 }
 .tab-content.tab-active {
   display:block;

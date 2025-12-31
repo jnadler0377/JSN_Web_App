@@ -24,11 +24,14 @@ class Case(Base):
     appraiser_doc2_path = Column(String, default="")
     arv = Column(Float, default=0.0)
     rehab = Column(Float, default=0.0)
+    rehab_condition = Column(String, default="Good")
     closing_costs = Column(Float, default=0.0)
     outstanding_liens = Column(Text, default="[]", nullable=False)  # JSON: [{"holder":"", "amount":""}]
+    property_overrides = Column(Text, default="{}")
 
     defendants = relationship("Defendant", back_populates="case", cascade="all, delete-orphan")
     dockets = relationship("Docket", back_populates="case", cascade="all, delete-orphan")
+    notes = relationship("Note", back_populates="case", cascade="all, delete-orphan")
 
     # Helpers for JSON field
     def get_outstanding_liens(self):
@@ -57,6 +60,9 @@ class Docket(Base):
     docket_datetime = Column(String, default="")
     docket_text = Column(Text, default="")
     link = Column(String, default="")
+    file_name = Column(String, default="")
+    file_url = Column(String, default="")
+    description = Column(String, default="")
     case = relationship("Case", back_populates="dockets")
 
 class Note(Base):
@@ -65,3 +71,4 @@ class Note(Base):
     case_id = Column(Integer, ForeignKey("cases.id"), index=True, nullable=False)
     content = Column(Text, default="")
     created_at = Column(String, default="")
+    case = relationship("Case", back_populates="notes")

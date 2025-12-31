@@ -17,6 +17,8 @@
   input[type="text"], input[type="date"], input[type="number"], textarea {
     width: 100%; padding: 8px 10px; border:1px solid #cbd5e1; border-radius:8px;
   }
+  .condition-group { display:flex; gap:0.6rem; flex-wrap:wrap; margin-top:4px; }
+  .condition-option { display:flex; align-items:center; gap:0.35rem; font-size:0.9rem; }
   textarea { min-height: 80px; }
 </style>
 
@@ -54,17 +56,49 @@
 
     <div>
       <label>ARV</label>
-      <input type="number" inputmode="decimal" name="arv" step="0.01" min="0" placeholder="0.00">
+      <input id="new-arv" type="number" inputmode="decimal" name="arv" step="0.01" min="0" placeholder="0.00">
+    </div>
+
+    <div>
+      <label>Year Built</label>
+      <input id="new-year-built" type="number" inputmode="numeric" name="year_built" step="1" min="1800" max="2100" placeholder="e.g., 1998">
+    </div>
+
+    <div>
+      <label>Living Sq Ft</label>
+      <input id="new-living-sqft" type="number" inputmode="numeric" name="living_sqft" step="1" min="0" placeholder="e.g., 1750">
     </div>
 
     <div>
       <label>Rehab</label>
-      <input type="number" inputmode="decimal" name="rehab" step="0.01" min="0" placeholder="0.00">
+      <input id="new-rehab" type="number" inputmode="decimal" name="rehab" step="0.01" min="0" placeholder="Suggested Rehab $0.00">
+    </div>
+
+    <div>
+      <label>Condition</label>
+      <div class="condition-group">
+        <label class="condition-option">
+          <input type="radio" name="rehab_condition" value="Poor">
+          <span>Poor</span>
+        </label>
+        <label class="condition-option">
+          <input type="radio" name="rehab_condition" value="Fair">
+          <span>Fair</span>
+        </label>
+        <label class="condition-option">
+          <input type="radio" name="rehab_condition" value="Good" checked>
+          <span>Good</span>
+        </label>
+        <label class="condition-option">
+          <input type="radio" name="rehab_condition" value="Excellent">
+          <span>Excellent</span>
+        </label>
+      </div>
     </div>
 
     <div>
       <label>Closing Costs</label>
-      <input type="number" inputmode="decimal" name="closing_costs" step="0.01" min="0" placeholder="0.00">
+      <input id="new-closing-costs" type="number" inputmode="decimal" name="closing_costs" step="0.01" min="0" placeholder="Suggested Closing Costs $0.00">
     </div>
 
     <div style="grid-column: 1 / -1;">
@@ -79,5 +113,62 @@ Jane Q. Doe"></textarea>
     <a class="btn" href="/cases">Cancel</a>
   </div>
 </form>
+
+<script>
+(function() {
+  const arvInput = document.getElementById('new-arv');
+  const closingInput = document.getElementById('new-closing-costs');
+  const yearInput = document.getElementById('new-year-built');
+  const sqftInput = document.getElementById('new-living-sqft');
+  const rehabInput = document.getElementById('new-rehab');
+  const conditionInputs = document.querySelectorAll('input[name="rehab_condition"]');
+  if (!arvInput || !closingInput) return;
+
+  function updateClosingPlaceholder() {
+    const val = parseFloat(arvInput.value || '0');
+    if (!val || isNaN(val)) {
+      closingInput.placeholder = 'Suggested Closing Costs $0.00';
+      return;
+    }
+    const suggested = (val * 0.015).toFixed(2);
+    closingInput.placeholder = `Suggested Closing Costs $${suggested}`;
+  }
+
+  arvInput.addEventListener('input', updateClosingPlaceholder);
+
+  function currentCondition() {
+    const checked = document.querySelector('input[name="rehab_condition"]:checked');
+    return checked ? checked.value : 'Good';
+  }
+
+  function estimateRehab() {
+    if (!yearInput || !sqftInput || !rehabInput) return;
+    const year = parseInt(yearInput.value || '0', 10);
+    const sqft = parseFloat(sqftInput.value || '0');
+    if (!year || !sqft || isNaN(sqft)) {
+      rehabInput.placeholder = 'Suggested Rehab $0.00';
+      return;
+    }
+    let base = 20.0;
+    if (year < 1960) base = 50.0;
+    else if (year <= 1989) base = 40.0;
+    else if (year <= 2009) base = 35.0;
+    else if (year <= 2020) base = 30.0;
+    else base = 20.0;
+
+    const mults = { poor: 1.0, fair: 0.75, good: 0.60, excellent: 0.50 };
+    const cond = currentCondition().toLowerCase();
+    const mult = mults[cond] ?? 0.60;
+
+    let estimate = base * sqft * mult;
+    estimate = Math.max(12000, Math.min(120000, estimate));
+    rehabInput.placeholder = `Suggested Rehab $${estimate.toFixed(2)}`;
+  }
+
+  if (yearInput) yearInput.addEventListener('input', estimateRehab);
+  if (sqftInput) sqftInput.addEventListener('input', estimateRehab);
+  conditionInputs.forEach((el) => el.addEventListener('change', estimateRehab));
+})();
+</script>
 
 {% endblock %}

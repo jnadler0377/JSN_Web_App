@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 
 from app.database import SessionLocal
-from app.models import Case, Defendant
+from app.models import Case, Defendant, Note
 from app.services.progress_bus import progress_bus
 
 logger = logging.getLogger("pascowebapp")
@@ -109,6 +109,21 @@ def _find_scraper_script() -> Path:
         ),
     )
 
+def _find_pinellas_scraper_script() -> Path:
+    """
+    Locate `pinellas_foreclosure_scraper.py` in <root>/app/scrapers.
+    """
+    p = BASE_DIR / "app" / "scrapers" / "pinellas_foreclosure_scraper.py"
+    if p.exists():
+        return p
+    raise HTTPException(
+        status_code=500,
+        detail=(
+            "Pinellas scraper script not found. Place 'pinellas_foreclosure_scraper.py' in "
+            "'app/scrapers/'."
+        ),
+    )
+
 
 # ---------------------------------------------------------------------
 # CSV import logic (upsert by normalized case_number)
@@ -161,6 +176,10 @@ def _import_csv_into_db(db: Session, csv_path: str) -> Tuple[int, int, int]:
             headers,
             ["Parcel ID", "Folio", "Parcel", "ParcelID"],
         )
+        addr_cols = [
+            h for h in headers
+            if h and h.strip().lower().startswith("defendant address")
+        ]
 
         if not case_col:
             msg = f"Could not find case number column in CSV headers: {headers}"
@@ -213,7 +232,9 @@ def _import_csv_into_db(db: Session, csv_path: str) -> Tuple[int, int, int]:
             dnames = [
                 (row.get(k, "") or "")
                 for k in row.keys()
-                if k and k.strip().lower().startswith("defendant")
+                if k
+                and k.strip().lower().startswith("defendant")
+                and not k.strip().lower().startswith("defendant address")
             ]
             dnames = [d.strip() for d in dnames if d and d.strip()]
 
@@ -222,6 +243,30 @@ def _import_csv_into_db(db: Session, csv_path: str) -> Tuple[int, int, int]:
                 if name and name not in existing_names:
                     db.add(Defendant(case_id=case.id, name=name))
                     existing_names.add(name)
+
+            # Defendant addresses as notes (optional)
+            if addr_cols:
+                existing_notes = {
+                    n.content for n in db.query(Note).filter(Note.case_id == case.id).all()
+                }
+                addresses = [(row.get(h, "") or "").strip() for h in addr_cols]
+                for idx, addr in enumerate(addresses):
+                    if not addr:
+                        continue
+                    name = dnames[idx] if idx < len(dnames) else ""
+                    if name:
+                        content = f"{name} address: {addr}"
+                    else:
+                        content = f"Defendant address: {addr}"
+                    if content in existing_notes:
+                        continue
+                    note = Note(
+                        case_id=case.id,
+                        content=content,
+                        created_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    )
+                    db.add(note)
+                    existing_notes.add(content)
 
         db.commit()
 
@@ -237,7 +282,13 @@ def _import_csv_into_db(db: Session, csv_path: str) -> Tuple[int, int, int]:
 # ---------------------------------------------------------------------
 # Public orchestrator – called from main.py
 # ---------------------------------------------------------------------
-async def run_update_cases_job(job_id: str, since_days: int) -> None:
+async def run_update_cases_job(
+    job_id: str,
+    since_days: int,
+    *,
+    run_pasco: bool = True,
+    run_pinellas: bool = True,
+) -> None:
     """
     Orchestrator for the update job:
       1) Run the foreclosure scraper with --since-days
@@ -250,38 +301,73 @@ async def run_update_cases_job(job_id: str, since_days: int) -> None:
         job_id,
         f"Starting update job {job_id} (since_days={since_days})",
     )
+    if not run_pasco and not run_pinellas:
+        msg = "No counties selected. Nothing to do."
+        await progress_bus.publish(job_id, f"[error] {msg}")
+        LAST_UPDATE_STATUS.update(
+            {
+                "last_run": datetime.utcnow().isoformat(timespec="seconds"),
+                "success": False,
+                "since_days": since_days,
+                "message": msg,
+            }
+        )
+        await progress_bus.publish(job_id, "[done] exit_code=1")
+        return
 
-    tmpdir = tempfile.mkdtemp(prefix="pasco_update_")
-    csv_out = os.path.join(tmpdir, "pasco_foreclosures.csv")
+    tmpdir = tempfile.mkdtemp(prefix="case_update_")
+    pasco_csv = os.path.join(tmpdir, "pasco_foreclosures.csv")
+    pinellas_csv = os.path.join(tmpdir, "pinellas_foreclosures.csv")
 
     try:
-        scraper_script = _find_scraper_script()
-        cmd = [
-            sys.executable,
-            str(scraper_script),
-            "--since-days",
-            str(max(0, int(since_days))),
-            "--out",
-            csv_out,
-        ]
+        added = updated = skipped = 0
 
-        await progress_bus.publish(job_id, f"Running scraper: {' '.join(cmd)}")
-        rc = await _stream_subprocess_to_progress(job_id, cmd)
-        if rc != 0:
-            await progress_bus.publish(
-                job_id,
-                f"[error] Scraper exited with code {rc}, aborting import.",
-            )
-            await progress_bus.publish(job_id, "[done] exit_code=1")
-            return
+        # Pasco
+        if run_pasco:
+            scraper_script = _find_scraper_script()
+            cmd = [
+                sys.executable,
+                str(scraper_script),
+                "--since-days",
+                str(max(0, int(since_days))),
+                "--out",
+                pasco_csv,
+            ]
+            await progress_bus.publish(job_id, f"Running Pasco scraper: {' '.join(cmd)}")
+            rc = await _stream_subprocess_to_progress(job_id, cmd)
+            if rc != 0:
+                await progress_bus.publish(job_id, f"[error] Pasco scraper exited with code {rc}.")
+            else:
+                await progress_bus.publish(job_id, "Pasco scraper finished, importing CSV...")
+                db: Session = SessionLocal()
+                try:
+                    a, u, s = _import_csv_into_db(db, pasco_csv)
+                    added += a; updated += u; skipped += s
+                finally:
+                    db.close()
 
-        # Import CSV into DB
-        await progress_bus.publish(job_id, "Scraper finished, starting CSV import...")
-        db: Session = SessionLocal()
-        try:
-            added, updated, skipped = _import_csv_into_db(db, csv_out)
-        finally:
-            db.close()
+        if run_pinellas:
+            scraper_script = _find_pinellas_scraper_script()
+            cmd = [
+                sys.executable,
+                str(scraper_script),
+                "--since-days",
+                str(max(0, int(since_days))),
+                "--out",
+                pinellas_csv,
+            ]
+            await progress_bus.publish(job_id, f"Running Pinellas scraper: {' '.join(cmd)}")
+            rc = await _stream_subprocess_to_progress(job_id, cmd)
+            if rc != 0:
+                await progress_bus.publish(job_id, f"[error] Pinellas scraper exited with code {rc}.")
+            else:
+                await progress_bus.publish(job_id, "Pinellas scraper finished, importing CSV...")
+                db = SessionLocal()
+                try:
+                    a, u, s = _import_csv_into_db(db, pinellas_csv)
+                    added += a; updated += u; skipped += s
+                finally:
+                    db.close()
 
         # ✅ success: publish status + update LAST_UPDATE_STATUS
         msg = f"Import complete. added={added}, updated={updated}, skipped={skipped}"

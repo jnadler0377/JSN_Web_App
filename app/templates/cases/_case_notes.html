@@ -18,6 +18,8 @@
           </small>
         {% endif %}
 
+        <a class="note-delete" href="/cases/{{ case.id }}/notes/{{ n.id }}/delete">delete</a>
+
         <span class="note-text">
           {% if n.content is defined or n.text is defined or n.body is defined %}
             {{ n.content or n.text or n.body }}

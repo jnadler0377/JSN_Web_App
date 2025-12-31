@@ -15,6 +15,7 @@ from sqlalchemy import text
 from PyPDF2 import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
+from reportlab.lib import colors
 
 from app.models import Case, Note
 from app.database import engine
@@ -164,14 +165,16 @@ def _iter_liens_for_display(case: Case) -> List[Dict[str, Any]]:
                 continue
             desc_raw = (
                 item.get("description")
+                or item.get("holder")
                 or item.get("lien_type")
                 or item.get("type")
                 or item.get("creditor")
                 or ""
             )
-            desc = str(desc_raw).strip() or "Lien"
+            desc = str(desc_raw).strip()
             amount = item.get("amount") or item.get("balance") or item.get("lien_amount")
-            rows.append({"description": desc, "amount": amount})
+            if desc or amount not in (None, ""):
+                rows.append({"description": desc, "amount": amount})
     return rows
 
 
@@ -394,7 +397,11 @@ def _extract_skiptrace_summary(data: Any) -> tuple[str, List[Dict[str, Any]], Li
 
 # ---------------- Main entrypoint ---------------- #
 
-def generate_case_report(case_id: int, db: Session) -> StreamingResponse:
+def build_case_report_bytes(
+    case_id: int,
+    db: Session,
+    include_attachments: bool = True,
+) -> io.BytesIO:
     """
     Generate a JSN Holdings Case Report matching the sample layout:
       - Header
@@ -445,14 +452,20 @@ def generate_case_report(case_id: int, db: Session) -> StreamingResponse:
         user_closing = None
     closing_num = user_closing if user_closing is not None else round(arv_num * 0.045, 2)
 
-    # ✅ Correct JSN Max Offer: (ARV * 70%) - Rehab - Closing
-    jsn_max_offer = round(
-        max(0.0, (arv_num * 0.70) - rehab_num - closing_num),
+    # Wholesale Offer: (ARV * 65%) - Rehab - Closing
+    wholesale_offer = round(
+        max(0.0, (arv_num * 0.65) - rehab_num - closing_num),
+        2,
+    )
+    flip_rate = 0.85 if arv_num > 350000 else 0.80
+    flip_offer = round(
+        max(0.0, (arv_num * flip_rate) - rehab_num - closing_num),
         2,
     )
 
     total_liens = _sum_liens_for_calc(case)
-    seller_cash = max(0.0, jsn_max_offer - total_liens)
+    seller_cash = max(0.0, wholesale_offer - total_liens)
+    short_sale_flag = total_liens > flip_offer
 
     lien_rows = _iter_liens_for_display(case)
 
@@ -483,19 +496,48 @@ def generate_case_report(case_id: int, db: Session) -> StreamingResponse:
     skip_raw = _load_skiptrace_for_report(case_id)
     primary_owner_name, phones_block, emails_block = _extract_skiptrace_summary(skip_raw)
 
-    # ---------- Build the summary PDF matching your sample ---------- #
+    # ---------- Build the summary PDF ---------- #
     summary_buf = io.BytesIO()
     c = canvas.Canvas(summary_buf, pagesize=letter)
     layout = SimpleLayout(c)
 
+    def _present(val: Any) -> Optional[str]:
+        if val is None:
+            return None
+        if isinstance(val, str):
+            s = val.strip()
+            return s if s else None
+        if isinstance(val, (int, float)):
+            return str(val)
+        return str(val)
+
+    def _add_line_if(label: str, value: Any) -> bool:
+        v = _present(value)
+        if v is None:
+            return False
+        layout.line(f"{label}: {v}")
+        return True
+
     # Header
     c.setFont("Helvetica-Bold", 16)
-    c.drawString(layout.margin_x, layout.y, "JSN Holdings – Case Report")
+    c.drawString(layout.margin_x, layout.y, "JSN Holdings - Case Report")
     layout.y -= 18
     c.setFont("Helvetica", 10)
     generated_str = _dt.datetime.now().strftime("%m/%d/%Y")
     c.drawString(layout.margin_x, layout.y, f"Generated: {generated_str}")
     layout.y -= 18
+    layout.line("Property Summary", size=11, bold=True)
+
+    if short_sale_flag:
+        c.saveState()
+        c.setFont("Helvetica-Bold", 44)
+        c.setStrokeColor(colors.HexColor("#e5a3a3"))
+        c.setFillColor(colors.HexColor("#e5a3a3"))
+        c.setLineWidth(1.5)
+        c.translate(layout.width - layout.margin_x, layout.height * 0.6)
+        c.rotate(20)
+        c.drawRightString(0, 0, "SHORT SALE")
+        c.restoreState()
 
     # Case line, address line, etc.
     layout.line(f"Case {case_number}", size=11, bold=False)
@@ -507,85 +549,177 @@ def generate_case_report(case_id: int, db: Session) -> StreamingResponse:
     layout.line(f"Style / Case Name: {style}", size=10)
 
     # Deal Summary section
-    layout.section_title("Deal Summary")
-    layout.line(f"ARV: {_fmt_money(arv_num)}")
-    layout.line(f"Rehab: {_fmt_money(rehab_num)}")
-    layout.line(f"Closing Costs: {_fmt_money(closing_num)}")
-    layout.line(f"JSN Max Offer: {_fmt_money(jsn_max_offer)}")
-    layout.line(f"Max Seller in Hand Cash (after liens): {_fmt_money(seller_cash)}")
+    deal_lines = []
+    if arv_num:
+        deal_lines.append(("ARV", _fmt_money(arv_num)))
+    if rehab_num:
+        deal_lines.append(("Rehab", _fmt_money(rehab_num)))
+    if closing_num:
+        deal_lines.append(("Closing Costs", _fmt_money(closing_num)))
+    if arv_num:
+        deal_lines.append(
+            ("JSN Offer", f"{_fmt_money(wholesale_offer)} - {_fmt_money(flip_offer)}")
+        )
+    if arv_num and seller_cash:
+        deal_lines.append(("Max Seller in Hand Cash (after liens)", _fmt_money(seller_cash)))
+
+    # Property Profile section (BatchData)
+    prop_lines = []
+    if isinstance(primary_prop, dict):
+        addr = primary_prop.get("address") or {}
+        listing = primary_prop.get("listing") or {}
+        general = primary_prop.get("general") or {}
+        building = primary_prop.get("building") or {}
+        lot = primary_prop.get("lot") or {}
+        valuation = primary_prop.get("valuation") or {}
+        assessment = primary_prop.get("assessment") or {}
+        tax = primary_prop.get("tax") or {}
+        owner = primary_prop.get("owner") or {}
+        owner_mail = owner.get("mailingAddress") or {}
+
+        prop_type = (
+            general.get("propertyTypeDetail")
+            or general.get("propertyTypeCategory")
+            or listing.get("propertyType")
+        )
+        year_built = general.get("yearBuilt") or primary_prop.get("yearBuilt") or listing.get("yearBuilt")
+        sqft = (
+            building.get("livingAreaSqft")
+            or general.get("buildingAreaSqft")
+            or listing.get("totalBuildingAreaSquareFeet")
+        )
+        lot_acres = lot.get("lotSizeAcres")
+        lot_sqft = lot.get("lotSizeSqft") or listing.get("lotSizeSquareFeet")
+        beds = building.get("bedrooms") or listing.get("bedroomCount")
+        baths = building.get("totalBathrooms") or listing.get("bathroomCount")
+        low_range = valuation.get("lowRangeValue") or listing.get("minListPrice")
+        high_range = valuation.get("highRangeValue") or listing.get("maxListPrice")
+        assessed = assessment.get("totalAssessedValue")
+        assessed_year = assessment.get("assessmentYear")
+        taxes = tax.get("taxAmount")
+        taxes_year = tax.get("taxYear")
+
+        owner_name = owner.get("fullName")
+        if not owner_name and isinstance(owner.get("names"), list) and owner["names"]:
+            owner_name = owner["names"][0].get("full") or owner["names"][0].get("first")
+
+        if _present(prop_type):
+            prop_lines.append(("Property Type", prop_type))
+        if _parse_float(year_built) > 0:
+            prop_lines.append(("Year Built", year_built))
+        if _parse_float(sqft) > 0:
+            prop_lines.append(("Living Area (Sq Ft)", f"{_parse_float(sqft):,.0f}"))
+        if _parse_float(lot_acres) > 0:
+            prop_lines.append(("Lot Size", f"{float(lot_acres):.3f} acres"))
+        elif _parse_float(lot_sqft) > 0:
+            prop_lines.append(("Lot Size", f"{_parse_float(lot_sqft):,.0f} sq ft"))
+        beds_val = _parse_float(beds)
+        baths_val = _parse_float(baths)
+        if beds_val > 0 or baths_val > 0:
+            b = int(beds_val) if beds_val > 0 else ""
+            ba = baths_val if baths_val > 0 else ""
+            prop_lines.append(("Beds / Baths", f"{b} / {ba}"))
+        if _parse_float(low_range) > 0 or _parse_float(high_range) > 0:
+            low = _fmt_money(low_range) if _parse_float(low_range) > 0 else ""
+            high = _fmt_money(high_range) if _parse_float(high_range) > 0 else ""
+            prop_lines.append(("Low / High Range", f"{low} - {high}".strip(" -")))
+        if _parse_float(assessed) > 0:
+            assessed_val = _fmt_money(assessed)
+            if _present(assessed_year):
+                assessed_val = f"{assessed_val} (Tax Year {assessed_year})"
+            prop_lines.append(("Assessed Value", assessed_val))
+        if _parse_float(taxes) > 0:
+            taxes_val = _fmt_money(taxes)
+            if _present(taxes_year):
+                taxes_val = f"{taxes_val} (Tax Year {taxes_year})"
+            prop_lines.append(("Annual Taxes", taxes_val))
+        if _present(owner_name):
+            prop_lines.append(("Owner", owner_name))
+        if isinstance(owner_mail, dict):
+            mail_parts = []
+            for part in [owner_mail.get("street"), owner_mail.get("city"), owner_mail.get("state")]:
+                if _present(part):
+                    mail_parts.append(str(part).strip())
+            zip_part = owner_mail.get("zip")
+            if _present(zip_part):
+                mail_parts.append(str(zip_part).strip())
+            mail = ", ".join(mail_parts)
+            if _present(mail):
+                prop_lines.append(("Mailing Address", mail))
+
+    if prop_lines:
+        layout.section_title("Property Profile")
+        for label, val in prop_lines:
+            _add_line_if(label, val)
+
+    if deal_lines:
+        layout.section_title("Deal Summary")
+        for label, val in deal_lines:
+            layout.line(f"{label}: {val}")
 
     # Outstanding Liens section
-    layout.section_title("Outstanding Liens")
     if lien_rows:
+        layout.section_title("Outstanding Liens")
         for row in lien_rows:
             desc = row["description"]
             amt = _fmt_money(row["amount"])
-            layout.line(f"• {desc} – {amt}")
-    else:
-        layout.line("No outstanding liens recorded.")
+            layout.line(f"- {desc} - {amt}")
 
     # Defendants section
-    layout.section_title("Defendants")
     if defendants:
+        layout.section_title("Defendants")
         for d in defendants:
-            layout.line(f"• {d}")
-    else:
-        layout.line("No defendants recorded.")
+            layout.line(f"- {d}")
 
     # Skip Trace (Owner & Contact Details)
-    layout.section_title("Skip Trace (Owner & Contact Details)")
-    if primary_owner_name:
-        layout.line(f"Primary Owner: {primary_owner_name}")
-    else:
-        layout.line("Primary Owner: (not found)")
+    if primary_owner_name or phones_block or emails_block:
+        layout.section_title("Skip Trace (Owner & Contact Details)")
+        if primary_owner_name:
+            layout.line(f"Primary Owner: {primary_owner_name}")
 
-    # Phones
-    if phones_block:
-        layout.line("Phones:")
-        for ph in phones_block:
-            num = _fmt_phone(ph.get("number"))
-            if not num:
-                continue
-            pieces = [num]
-            if ph.get("type"):
-                pieces.append(f"({ph['type']})")
-            if ph.get("score") is not None:
-                pieces.append(f"Score: {ph['score']}")
-            if ph.get("last_reported"):
-                pieces.append(f"Last: {ph['last_reported']}")
-            pieces.append(f"Tested: {_yn_icon(ph.get('tested'))}")
-            pieces.append(f"Reachable: {_yn_icon(ph.get('reachable'))}")
-            pieces.append(f"DNC: {_yn_icon(ph.get('dnc'))}")
-            layout.line(" - " + " | ".join(pieces))
-    else:
-        layout.line("Phones: (none found)")
+        if phones_block:
+            layout.line("Phones:")
+            for ph in phones_block:
+                num = _fmt_phone(ph.get("number"))
+                if not num:
+                    continue
+                pieces = [num]
+                if ph.get("type"):
+                    pieces.append(f"({ph['type']})")
+                if ph.get("score") is not None:
+                    pieces.append(f"Score: {ph['score']}")
+                if ph.get("last_reported"):
+                    pieces.append(f"Last: {ph['last_reported']}")
+                if ph.get("tested") is not None:
+                    pieces.append(f"Tested: {_yn_icon(ph.get('tested'))}")
+                if ph.get("reachable") is not None:
+                    pieces.append(f"Reachable: {_yn_icon(ph.get('reachable'))}")
+                if ph.get("dnc") is not None:
+                    pieces.append(f"DNC: {_yn_icon(ph.get('dnc'))}")
+                layout.line(" - " + " | ".join(pieces))
 
-    # Emails
-    if emails_block:
-        layout.line("Emails:")
-        for em in emails_block:
-            addr = (em.get("email") or "").strip()
-            if not addr:
-                continue
-            pieces = [addr]
-            tested = em.get("deliverable")
-            if tested is not None:
-                pieces.append(f"Tested: {_yn_icon(tested)}")
-            layout.line(" - " + " | ".join(pieces))
-    else:
-        layout.line("Emails: (none found)")
+        if emails_block:
+            layout.line("Emails:")
+            for em in emails_block:
+                addr = (em.get("email") or "").strip()
+                if not addr:
+                    continue
+                pieces = [addr]
+                tested = em.get("deliverable")
+                if tested is not None:
+                    pieces.append(f"Tested: {_yn_icon(tested)}")
+                layout.line(" - " + " | ".join(pieces))
 
-        # Notes
-    layout.section_title("Notes")
+    # Notes
     if notes:
+        layout.section_title("Notes")
         for n in notes[:15]:
             created = getattr(n, "created_at", "") or ""
             content = (getattr(n, "content", "") or "").replace("\r", " ").replace("\n", " ")
             if len(content) > 220:
                 content = content[:217] + "..."
-            layout.line(f"• [{created}] {content}", size=9)
-    else:
-        layout.line("No notes recorded.")
+            stamp = f"[{created}] " if created else ""
+            layout.line(f"- {stamp}{content}", size=9)
 
     # Attached Documents
     layout.section_title("Attached Documents")
@@ -608,10 +742,9 @@ def generate_case_report(case_id: int, db: Session) -> StreamingResponse:
         attached_labels.append("Value Calculation")
 
     if attached_labels:
+        layout.section_title("Attached Documents")
         for lbl in attached_labels:
-            layout.line(f"• {lbl}")
-    else:
-        layout.line("No documents uploaded.")
+            layout.line(f"- {lbl}")
 
     # Finish summary page(s)
     c.showPage()
@@ -634,11 +767,12 @@ def generate_case_report(case_id: int, db: Session) -> StreamingResponse:
             headers={"Content-Disposition": f"inline; filename=case_{case_id}_report.pdf"},
         )
 
-    _append_pdf_if_exists(writer, vc)
-    _append_pdf_if_exists(writer, mtg)
-    _append_pdf_if_exists(writer, cd)
-    _append_pdf_if_exists(writer, pd)
-    _append_pdf_if_exists(writer, val)
+    if include_attachments:
+        _append_pdf_if_exists(writer, vc)
+        _append_pdf_if_exists(writer, mtg)
+        _append_pdf_if_exists(writer, cd)
+        _append_pdf_if_exists(writer, pd)
+        _append_pdf_if_exists(writer, val)
 
     out_buf = io.BytesIO()
     if len(writer.pages) == 0:
@@ -648,6 +782,11 @@ def generate_case_report(case_id: int, db: Session) -> StreamingResponse:
         writer.write(out_buf)
         out_buf.seek(0)
 
+    return out_buf
+
+
+def generate_case_report(case_id: int, db: Session) -> StreamingResponse:
+    out_buf = build_case_report_bytes(case_id, db, include_attachments=True)
     return StreamingResponse(
         out_buf,
         media_type="application/pdf",

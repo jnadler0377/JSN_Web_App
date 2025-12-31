@@ -5,8 +5,18 @@
 
 <form id="bulk-actions" method="post">
   <div style="display:flex; gap: 0.5rem; align-items:center; flex-wrap: wrap; margin: 0.5rem 0;">
-    <input type="search" name="case" value="{{ search_query or '' }}" placeholder="Search case #">
+    <input type="search" name="case" value="{{ search_query or '' }}" placeholder="Search address">
     <button type="submit" formaction="/cases" formmethod="get">Search</button>
+
+    <label style="margin-left:1rem;">
+      Tag
+      <select name="tag" onchange="this.form.action='/cases'; this.form.method='get'; this.form.submit();">
+        <option value="">All</option>
+        {% for t in tag_options %}
+          <option value="{{ t }}" {% if tag_filter == t %}selected{% endif %}>{{ t }}</option>
+        {% endfor %}
+      </select>
+    </label>
 
     <label style="margin-left:1rem;">
       Page size
@@ -19,13 +29,19 @@
 
     <label style="margin-left:1rem;">
       <input type="checkbox" id="show-archived-toggle" {% if show_archived %}checked{% endif %}
-             onclick="window.location.href='?page={{ pagination.page }}&show_archived=&page_size={{ page_size }}'+(this.checked?1:0){% if search_query %}+'&case={{ search_query }}'{% endif %}">
+             onclick="window.location.href='?page={{ pagination.page }}&show_archived=&page_size={{ page_size }}'+(this.checked?1:0){% if search_query %}+'&case={{ search_query }}'{% endif %}{% if tag_filter %}+'&tag={{ tag_filter }}'{% endif %}">
       Show archived
     </label>
 
     <button type="submit" id="btn-archive" formaction="/cases/archive" formmethod="post" style="font-size:0.6em; padding:0.5em 0.6em;">Archive Selected</button>
     <button type="submit" id="btn-unarchive" formaction="/cases/unarchive" formmethod="post" style="font-size:0.6em; padding:0.5em 0.6em;">Unarchive Selected</button>
     <button type="submit" id="btn-export" formaction="/cases/export" formmethod="post" style="font-size:0.6em; padding:0.5em 0.6em;">Export CSV</button>
+    <button type="submit" id="btn-export-crm" formaction="/cases/export_crm" formmethod="post" style="font-size:0.6em; padding:0.5em 0.6em;">Export CRM CSV</button>
+    <button type="submit" id="btn-deal-calcs" formaction="/cases/reports/download" formmethod="post" style="font-size:0.6em; padding:0.5em 0.6em;">Download Deal Calculators</button>
+    <label style="margin-left:0.25rem; font-size:0.7em;">
+      <input type="checkbox" name="include_attachments" value="1" checked>
+      Include attached documents
+    </label>
 <a class="btn" href="/cases/new" style="font-size:0.6em; padding:0.5em 0.6em;">➕ Add Case</a>
     <input type="hidden" name="show_archived" value="{{ 1 if show_archived else 0 }}">
     <input type="hidden" name="page" value="{{ pagination.page }}">
@@ -40,6 +56,8 @@
   .table th, .table td { padding: 0.5em; vertical-align: middle; }
   .faded { opacity: 0.45; }
   .pill { display:inline-block; padding:2px 8px; border-radius:999px; background:#eef2ff; color:#3730a3; font-size:11px; }
+  .pill-tag { background:#1f3d2e; color:#a6f3c5; }
+  .pill-warn { background:#412222; color:#ffb3b3; }
 </style>
 
 {% if cases %}
@@ -70,10 +88,10 @@
 
         <td>
           {% if c.archived %}<span class="pill">Archived</span>{% endif %}
-          <span class="pill">Def: {{ defendants_count.get(c.id, 0) }}</span>
-          <span class="pill">Notes: {{ notes_count.get(c.id, 0) }}</span>
-          {% if docs_present.get(c.id) %}<span class="pill">Docs</span>{% endif %}
-          {% if skiptrace_present.get(c.id) %}<span class="pill">SkipTrace ✅</span>{% else %}<span class="pill">SkipTrace ❌</span>{% endif %}
+          {% if short_sale.get(c.id) %}<span class="pill pill-warn">Short Sale</span>{% endif %}
+          {% for tag in quick_flags.get(c.id, []) %}
+            <span class="pill pill-tag">{{ tag }}</span>
+          {% endfor %}
         </td>
       </tr>
       {% endfor %}
@@ -84,16 +102,16 @@
   <!-- Pagination -->
   <nav class="pagination" aria-label="Pagination">
     {% if pagination.page > 1 %}
-      <a class="btn" href="?page=1&page_size={{ page_size }}&show_archived={{ 1 if show_archived else 0 }}{% if search_query %}&case={{ search_query }}{% endif %}">« First</a>
-      <a class="btn" href="?page={{ pagination.page - 1 }}&page_size={{ page_size }}&show_archived={{ 1 if show_archived else 0 }}{% if search_query %}&case={{ search_query }}{% endif %}">‹ Prev</a>
+      <a class="btn" href="?page=1&page_size={{ page_size }}&show_archived={{ 1 if show_archived else 0 }}{% if search_query %}&case={{ search_query }}{% endif %}{% if tag_filter %}&tag={{ tag_filter }}{% endif %}">« First</a>
+      <a class="btn" href="?page={{ pagination.page - 1 }}&page_size={{ page_size }}&show_archived={{ 1 if show_archived else 0 }}{% if search_query %}&case={{ search_query }}{% endif %}{% if tag_filter %}&tag={{ tag_filter }}{% endif %}">‹ Prev</a>
     {% else %}
       <span class="btn disabled">« First</span>
       <span class="btn disabled">‹ Prev</span>
     {% endif %}
     <span>Page {{ pagination.page }} of {{ pagination.pages }}</span>
     {% if pagination.page < pagination.pages %}
-      <a class="btn" href="?page={{ pagination.page + 1 }}&page_size={{ page_size }}&show_archived={{ 1 if show_archived else 0 }}{% if search_query %}&case={{ search_query }}{% endif %}">Next ›</a>
-      <a class="btn" href="?page={{ pagination.pages }}&page_size={{ page_size }}&show_archived={{ 1 if show_archived else 0 }}{% if search_query %}&case={{ search_query }}{% endif %}">Last »</a>
+      <a class="btn" href="?page={{ pagination.page + 1 }}&page_size={{ page_size }}&show_archived={{ 1 if show_archived else 0 }}{% if search_query %}&case={{ search_query }}{% endif %}{% if tag_filter %}&tag={{ tag_filter }}{% endif %}">Next ›</a>
+      <a class="btn" href="?page={{ pagination.pages }}&page_size={{ page_size }}&show_archived={{ 1 if show_archived else 0 }}{% if search_query %}&case={{ search_query }}{% endif %}{% if tag_filter %}&tag={{ tag_filter }}{% endif %}">Last »</a>
     {% else %}
       <span class="btn disabled">Next ›</span>
       <span class="btn disabled">Last »</span>

@@ -33,16 +33,20 @@
     {% set sv_addr = case.address_override or case.address %}
 
     <div class="streetview-container">
-      {% if sv_addr %}
+      {% if sv_addr and streetview_url(sv_addr) %}
         <img
           src="{{ streetview_url(sv_addr) }}"
           alt="Street View"
           class="streetview-img"
           onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"
         >
-        <div class="streetview-placeholder" style="display:none;">No Street View</div>
+        <div class="streetview-placeholder" style="display:none;">
+          Street View unavailable. <a href="https://www.google.com/maps?q={{ sv_addr|urlencode }}&layer=c" target="_blank">Open in Google Maps</a>
+        </div>
       {% else %}
-        <div class="streetview-placeholder">No Street View</div>
+        <div class="streetview-placeholder">
+          Street View unavailable. <a href="https://www.google.com/maps?q={{ sv_addr|urlencode }}&layer=c" target="_blank">Open in Google Maps</a>
+        </div>
       {% endif %}
     </div>
   </div>
@@ -58,15 +62,43 @@
     </div>
 
     <section class="numbers-section">
-      <h3>Numbers</h3>
+      <h3>Value Calculation</h3>
       <form method="post" action="/cases/{{ case.id }}/update">
         <label>ARV</label>
-        <input type="number" step="0.01" name="arv" value="{{ arv }}">
+        <input type="number" step="0.01" name="arv" id="arv-input" value="{{ arv }}">
+        <label>Condition</label>
+        {% set rc = rehab_condition or 'Good' %}
+        <div class="condition-group">
+          <label class="condition-option">
+            <input type="radio" name="rehab_condition" value="Poor" {% if rc == 'Poor' %}checked{% endif %}>
+            <span>Poor</span>
+          </label>
+          <label class="condition-option">
+            <input type="radio" name="rehab_condition" value="Fair" {% if rc == 'Fair' %}checked{% endif %}>
+            <span>Fair</span>
+          </label>
+          <label class="condition-option">
+            <input type="radio" name="rehab_condition" value="Good" {% if rc == 'Good' %}checked{% endif %}>
+            <span>Good</span>
+          </label>
+          <label class="condition-option">
+            <input type="radio" name="rehab_condition" value="Excellent" {% if rc == 'Excellent' %}checked{% endif %}>
+            <span>Excellent</span>
+          </label>
+        </div>
         <label>Rehab</label>
-        <input type="number" step="0.01" name="rehab" value="{{ rehab }}">
+        <input type="number" step="0.01" name="rehab" id="rehab-input"
+               data-year-built="{{ rehab_year_built or '' }}"
+               data-sqft="{{ rehab_sqft or '' }}"
+               value="{{ rehab if rehab and rehab > 0 else '' }}"
+               placeholder="{% if rehab_suggested %}Suggested Rehab {{ rehab_suggested | currency }}{% endif %}">
         <label>Closing Costs</label>
-        <input type="number" step="0.01" name="closing_costs" value="{{ closing }}">
-        <p><strong>JSN Max Offer:</strong> {{ jsn_max_offer | currency }}</p>
+        {% set closing_placeholder = (arv * 0.015) if arv else None %}
+        {% set closing_value = closing_input if closing_input is defined else closing %}
+        <input type="number" step="0.01" name="closing_costs" id="closing-costs-input"
+               value="{{ closing_value if closing_value and closing_value > 0 else '' }}"
+               placeholder="{% if closing_placeholder %}Suggested Closing Costs ${{ '%.2f'|format(closing_placeholder) }}{% endif %}">
+        <p><strong>JSN Offer:</strong> {{ wholesale_offer | currency }} - {{ flip_offer | currency }}</p>
         <button class="btn" type="submit">Save</button>
       </form>
     </section>
@@ -268,25 +300,27 @@
 
     <ul class="notes-list">
     {% if notes %}
-      {% for n in notes %}
-        <li>
-          {% if n.created_at is defined and n.created_at %}
-            <small class="note-date">
-              {{ n.created_at.strftime("%m/%d/%Y %I:%M %p")
-                 if n.created_at.__class__.__name__ in ["datetime", "date"]
-                 else n.created_at }}
-            </small>
-          {% endif %}
+    {% for n in notes %}
+      <li>
+        {% if n.created_at is defined and n.created_at %}
+          <small class="note-date">
+            {{ n.created_at.strftime("%m/%d/%Y %I:%M %p")
+               if n.created_at.__class__.__name__ in ["datetime", "date"]
+               else n.created_at }}
+          </small>
+        {% endif %}
 
-          <span class="note-text">
-            {% if n.content is defined or n.text is defined or n.body is defined %}
-              {{ n.content or n.text or n.body }}
-            {% else %}
-              {{ n }}
-            {% endif %}
-          </span>
-        </li>
-      {% endfor %}
+        <a class="note-delete" href="/cases/{{ case.id }}/notes/{{ n.id }}/delete">delete</a>
+
+        <span class="note-text">
+          {% if n.content is defined or n.text is defined or n.body is defined %}
+            {{ n.content or n.text or n.body }}
+          {% else %}
+            {{ n }}
+          {% endif %}
+        </span>
+      </li>
+    {% endfor %}
     {% else %}
       <li><em>No notes yet.</em></li>
     {% endif %}

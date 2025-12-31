@@ -11,17 +11,6 @@
       <h1>JSN Holdings Foreclosure Manager</h1>
       <nav>
         <a href="/">Cases</a> | <a href="/import">Update Case List</a>
-        {% set _parcel_id = (
-             active_parcel_id if (active_parcel_id is defined and active_parcel_id)
-             else (case.parcel_id if (case is defined and case and case.parcel_id) else None)
-        ) %}
-        {% if _parcel_id %}
-          | <a href="{{ pasco_appraiser_url(_parcel_id) }}" target="_blank" rel="noopener">Pasco Appraiser</a>
-        {% else %}
-          | <a href="https://search.pascopa.com/default.aspx" target="_blank" rel="noopener">Pasco Appraiser</a>
-        {% endif %}
-        | <a href="https://app.pascoclerk.com/appdot-public-online-services-forms-or-search.asp" target="_blank" rel="noopener">Pasco Official Records</a>
-        | <a href="https://www.civitekflorida.com/ocrs/county/51/" target="_blank" rel="noopener">Pasco Clerk of Court</a>
       </nav>
     </header>
 

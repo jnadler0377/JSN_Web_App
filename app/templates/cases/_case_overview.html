@@ -38,16 +38,20 @@
     {# Street View #}
     {% set sv_addr = case.address_override or case.address %}
     <div class="streetview-container">
-      {% if sv_addr %}
+      {% if sv_addr and streetview_url(sv_addr) %}
         <img
           src="{{ streetview_url(sv_addr) }}"
           alt="Street View"
           class="streetview-img"
           onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"
         >
-        <div class="streetview-placeholder" style="display:none;">No Street View</div>
+        <div class="streetview-placeholder" style="display:none;">
+          Street View unavailable. <a href="https://www.google.com/maps?q={{ sv_addr|urlencode }}&layer=c" target="_blank">Open in Google Maps</a>
+        </div>
       {% else %}
-        <div class="streetview-placeholder">No Street View</div>
+        <div class="streetview-placeholder">
+          Street View unavailable. <a href="https://www.google.com/maps?q={{ sv_addr|urlencode }}&layer=c" target="_blank">Open in Google Maps</a>
+        </div>
       {% endif %}
     </div>
   </div>

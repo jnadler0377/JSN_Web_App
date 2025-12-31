@@ -375,6 +375,49 @@ def batchdata_property_lookup_all_attributes(
 # ----------------------------------------------------------------------
 # DB helpers: property + skiptrace tables
 # ----------------------------------------------------------------------
+def _extract_properties(payload: Optional[dict]) -> list[dict]:
+    if not isinstance(payload, dict):
+        return []
+
+    # Top-level properties
+    props = payload.get("properties")
+    if isinstance(props, list):
+        return props
+
+    results = payload.get("results")
+    if not results and isinstance(payload.get("response"), dict):
+        results = payload["response"].get("results")
+
+    if isinstance(results, dict):
+        props = results.get("properties")
+        if isinstance(props, list):
+            return props
+        prop = results.get("property")
+        if isinstance(prop, dict):
+            return [prop]
+    elif isinstance(results, list):
+        for item in results:
+            if isinstance(item, dict):
+                props = item.get("properties")
+                if isinstance(props, list):
+                    return props
+    return []
+
+
+def normalize_property_payload(payload: Optional[dict]) -> dict:
+    """
+    Normalize BatchData property payloads so templates can rely on:
+      payload['results']['properties'] -> list
+    """
+    if not isinstance(payload, dict):
+        return {"results": {"properties": []}}
+    results = payload.get("results")
+    if isinstance(results, dict) and isinstance(results.get("properties"), list):
+        return payload
+    props = _extract_properties(payload)
+    return {"results": {"properties": props}}
+
+
 def save_property_for_case(case_id: int, payload: dict) -> None:
     """
     Upsert a single row in case_property for this case_id.
@@ -385,8 +428,7 @@ def save_property_for_case(case_id: int, payload: dict) -> None:
             return 1 if val else 0
         return None
 
-    results = (payload or {}).get("results") or {}
-    props = results.get("properties") or []
+    props = _extract_properties(payload or {})
     if not props:
         logger.warning("save_property_for_case: no 'properties' in payload for case %s", case_id)
         return
@@ -761,7 +803,8 @@ def load_property_for_case(case_id: int) -> Optional[dict]:
             ).fetchone()
         if row and row[0]:
             try:
-                return json.loads(row[0])
+                raw = json.loads(row[0])
+                return normalize_property_payload(raw)
             except Exception:
                 return None
     except Exception as exc:

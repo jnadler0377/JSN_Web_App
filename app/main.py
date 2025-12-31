@@ -19,8 +19,11 @@ import sys
 import tempfile
 import uuid
 import io, json
+import zipfile
 from pathlib import Path
 from typing import List, Optional
+from urllib.parse import quote_plus
+import re
 from tools.import_pasco_csv import main as import_pasco_csv_main
 import requests  # for BatchData skip trace calls
 
@@ -49,7 +52,7 @@ from app.services.progress_bus import progress_bus
 from app.settings import settings
 from .database import Base, engine, SessionLocal
 from .models import Case, Defendant, Docket, Note
-from .utils import ensure_case_folder, compute_offer_70
+from .utils import ensure_case_folder, compute_offer_70, compute_offer_80
 from .schemas import OutstandingLien, OutstandingLiensUpdate
 from app.services.skiptrace_service import (
     get_case_address_components,
@@ -59,9 +62,10 @@ from app.services.skiptrace_service import (
     save_skiptrace_row,
     load_property_for_case,
     load_skiptrace_for_case,
+    normalize_property_payload,
 )
 
-from app.services.report_service import generate_case_report
+from app.services.report_service import generate_case_report, build_case_report_bytes
 from app.services.update_cases_service import run_update_cases_job
 from app.services.update_cases_service import LAST_UPDATE_STATUS
 
@@ -108,12 +112,12 @@ def streetview_url(address: str) -> str:
     """
     if not address:
         return ""
+    address_q = quote_plus(address)
     key = settings.GOOGLE_MAPS_API_KEY
     if key:
         base = "https://maps.googleapis.com/maps/api/streetview"
-        return f"{base}?size=600x360&location={address}&key={key}"
-    base = "https://maps.googleapis.com/maps/api/staticmap"
-    return f"{base}?size=640x360&markers={address}"
+        return f"{base}?size=600x360&location={address_q}&key={key}"
+    return ""
 
 
 def _parcel_to_property_card_param(parcel_id: str | None) -> Optional[str]:
@@ -149,6 +153,29 @@ def pasco_appraiser_url(parcel_id: str | None) -> Optional[str]:
         return None
     return f"https://search.pascopa.com/parcel.aspx?parcel={param}"
 
+def _is_pinellas_parcel(parcel_id: str | None) -> bool:
+    if not parcel_id:
+        return False
+    return re.fullmatch(r"\d{2}-\d{2}-\d{2}-\d{5}-\d{3}-\d{4}", parcel_id.strip()) is not None
+
+
+def pinellas_appraiser_url(parcel_id: str | None) -> Optional[str]:
+    """
+    Return the Pinellas property details URL for a given parcel id.
+    Example:
+      19-29-16-92340-005-0160 -> s=162919923400050160
+    """
+    if not _is_pinellas_parcel(parcel_id):
+        return None
+    parts = parcel_id.strip().split("-")
+    reordered = parts[2] + parts[1] + parts[0] + "".join(parts[3:])
+    digits = "".join(ch for ch in reordered if ch.isdigit())
+    if not digits:
+        return None
+    return (
+        "https://www.pcpao.gov/property-details"
+        f"?s={digits}&parcel={parcel_id.strip()}"
+    )
 
 # ======================================================================
 # BatchData Skip Trace config + helpers
@@ -158,6 +185,7 @@ def pasco_appraiser_url(parcel_id: str | None) -> Optional[str]:
 templates.env.filters["currency"] = _currency
 templates.env.globals["streetview_url"] = streetview_url
 templates.env.globals["pasco_appraiser_url"] = pasco_appraiser_url
+templates.env.globals["pinellas_appraiser_url"] = pinellas_appraiser_url
 
 # ======================================================================
 # DB session
@@ -171,6 +199,102 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def _estimate_rehab_from_property(
+    property_data: Optional[dict],
+    condition: str,
+    property_overrides: Optional[dict] = None,
+) -> Optional[float]:
+    if (not property_data or not isinstance(property_data, dict)) and not property_overrides:
+        return None
+    try:
+        def _to_float(val: object) -> Optional[float]:
+            if val is None:
+                return None
+            if isinstance(val, (int, float)):
+                return float(val)
+            s = str(val).strip()
+            if not s:
+                return None
+            s = re.sub(r"[^0-9.]", "", s)
+            if not s:
+                return None
+            try:
+                return float(s)
+            except ValueError:
+                return None
+
+        year_built = None
+        sqft = None
+        if property_data and isinstance(property_data, dict):
+            props = (property_data.get("results") or {}).get("properties") or []
+            if props:
+                p = props[0]
+                listing = p.get("listing") or {}
+                general = p.get("general") or {}
+                building = p.get("building") or {}
+
+                year_built = (
+                    listing.get("yearBuilt")
+                    or general.get("yearBuilt")
+                    or p.get("yearBuilt")
+                )
+                sqft = (
+                    listing.get("totalBuildingAreaSquareFeet")
+                    or building.get("livingAreaSqft")
+                    or general.get("buildingAreaSqft")
+                )
+
+        overrides = property_overrides or {}
+        override_year = _to_float(overrides.get("year_built"))
+        override_sqft = _to_float(overrides.get("sqft"))
+
+        year_val = override_year if override_year else _to_float(year_built)
+        area_val = override_sqft if override_sqft else _to_float(sqft)
+
+        year = int(year_val) if year_val else None
+        area = float(area_val) if area_val else None
+        if not year or not area or area <= 0:
+            return None
+
+        if year < 1960:
+            base = 50.0
+        elif year <= 1989:
+            base = 40.0
+        elif year <= 2009:
+            base = 35.0
+        elif year <= 2020:
+            base = 30.0
+        else:
+            base = 20.0
+
+        condition_key = (condition or "Good").strip().lower()
+        multipliers = {
+            "poor": 1.00,
+            "fair": 0.75,
+            "good": 0.60,
+            "excellent": 0.50,
+        }
+        mult = multipliers.get(condition_key, 1.00)
+
+        estimate = base * area * mult
+        estimate = max(12000.0, min(120000.0, estimate))
+        estimate = round(estimate * 2) / 2
+        return round(estimate, 2)
+    except Exception:
+        return None
+
+
+def _parse_property_overrides(case: Case) -> dict:
+    try:
+        raw = getattr(case, "property_overrides", "") or ""
+        if raw:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        pass
+    return {}
 
 
 # ======================================================================
@@ -227,6 +351,7 @@ def ensure_sqlite_columns():
     Base.metadata.create_all(bind=engine)
     try:
         inspector = inspect(engine)
+        tables = inspector.get_table_names()
         cols = {c["name"] for c in inspector.get_columns("cases")}
         with engine.begin() as conn:
             if "current_deed_path" not in cols:
@@ -247,6 +372,30 @@ def ensure_sqlite_columns():
                 conn.exec_driver_sql(
                     "ALTER TABLE cases ADD COLUMN skip_trace_json TEXT DEFAULT NULL"
                 )
+            if "rehab_condition" not in cols:
+                conn.exec_driver_sql(
+                    "ALTER TABLE cases ADD COLUMN rehab_condition TEXT DEFAULT 'Good'"
+                )
+            if "property_overrides" not in cols:
+                conn.exec_driver_sql(
+                    "ALTER TABLE cases ADD COLUMN property_overrides TEXT DEFAULT '{}'"
+                )
+        # Dockets table: add columns for uploaded files if missing
+        if "dockets" in tables:
+            docket_cols = {c["name"] for c in inspector.get_columns("dockets")}
+            with engine.begin() as conn:
+                if "file_name" not in docket_cols:
+                    conn.exec_driver_sql(
+                        "ALTER TABLE dockets ADD COLUMN file_name TEXT DEFAULT ''"
+                    )
+                if "file_url" not in docket_cols:
+                    conn.exec_driver_sql(
+                        "ALTER TABLE dockets ADD COLUMN file_url TEXT DEFAULT ''"
+                    )
+                if "description" not in docket_cols:
+                    conn.exec_driver_sql(
+                        "ALTER TABLE dockets ADD COLUMN description TEXT DEFAULT ''"
+                    )
     except OperationalError:
         # first run or non-sqlite; ignore
         pass
@@ -526,6 +675,7 @@ def create_case(
     address_override: Optional[str] = Form(None),
     arv: Optional[str] = Form(None),
     rehab: Optional[str] = Form(None),
+    rehab_condition: Optional[str] = Form(None),
     closing_costs: Optional[str] = Form(None),
     defendants_csv: Optional[str] = Form(None),
     db: Session = Depends(get_db),
@@ -570,6 +720,8 @@ def create_case(
         case.arv = v_arv
     if v_rehab is not None:
         case.rehab = v_rehab
+    if rehab_condition:
+        case.rehab_condition = rehab_condition.strip()
     if v_cc is not None:
         case.closing_costs = v_cc
 
@@ -596,6 +748,7 @@ def update_case_fields(
     address_override: Optional[str] = Form(None),
     arv: Optional[str] = Form(None),
     rehab: Optional[str] = Form(None),
+    rehab_condition: Optional[str] = Form(None),
     closing_costs: Optional[str] = Form(None),
     db: Session = Depends(get_db),
 ):
@@ -636,6 +789,8 @@ def update_case_fields(
         case.arv = v_arv
     if v_rehab is not None:
         case.rehab = v_rehab
+    if rehab_condition:
+        case.rehab_condition = rehab_condition.strip()
     if v_cc is not None:
         case.closing_costs = v_cc
 
@@ -679,6 +834,12 @@ def case_detail(request: Request, case_id: int, db: Session = Depends(get_db)):
     property_error = None
 
     offer = compute_offer_70(case.arv or 0, case.rehab or 0, case.closing_costs or 0)
+    flip_offer = compute_offer_80(case.arv or 0, case.rehab or 0, case.closing_costs or 0)
+    rehab_condition = getattr(case, "rehab_condition", "") or "Good"
+    property_overrides = _parse_property_overrides(case)
+    rehab_suggested = _estimate_rehab_from_property(
+        property_data, rehab_condition, property_overrides
+    )
 
     return templates.TemplateResponse(
         "case_detail.html",
@@ -686,12 +847,16 @@ def case_detail(request: Request, case_id: int, db: Session = Depends(get_db)):
             "request": request,
             "case": case,
             "offer_70": offer,
+            "offer_80": flip_offer,
             "active_parcel_id": case.parcel_id,
             "notes": notes,
             "skip_trace": skip_trace,
             "skip_trace_error": skip_trace_error,
             "property_data": property_data,
             "property_error": property_error,
+            "rehab_condition": rehab_condition,
+            "rehab_suggested": rehab_suggested,
+            "property_overrides": property_overrides,
         },
     )
 
@@ -741,6 +906,12 @@ def skip_trace_case(request: Request, case_id: int, db: Session = Depends(get_db
             skip_trace_error = f"Unexpected error during skip trace: {exc}"
 
     offer = compute_offer_70(case.arv or 0, case.rehab or 0, case.closing_costs or 0)
+    rehab_condition = getattr(case, "rehab_condition", "") or "Good"
+    property_overrides = _parse_property_overrides(case)
+    rehab_suggested = _estimate_rehab_from_property(
+        load_property_for_case(case_id), rehab_condition, property_overrides
+    )
+    flip_offer = compute_offer_80(case.arv or 0, case.rehab or 0, case.closing_costs or 0)
 
     return templates.TemplateResponse(
         "case_detail.html",
@@ -748,12 +919,16 @@ def skip_trace_case(request: Request, case_id: int, db: Session = Depends(get_db
             "request": request,
             "case": case,
             "offer_70": offer,
+            "offer_80": flip_offer,
             "active_parcel_id": case.parcel_id,
             "notes": notes,
             "skip_trace": skip_trace,
             "skip_trace_error": skip_trace_error,
             "property_data": load_property_for_case(case_id),
             "property_error": None,
+            "rehab_condition": rehab_condition,
+            "rehab_suggested": rehab_suggested,
+            "property_overrides": property_overrides,
         },
     )
 
@@ -791,10 +966,11 @@ def property_lookup_case(request: Request, case_id: int, db: Session = Depends(g
 
     try:
         street, city, state, postal_code = get_case_address_components(case)
-        property_data = batchdata_property_lookup_all_attributes(
+        raw_property_data = batchdata_property_lookup_all_attributes(
             street, city, state, postal_code
         )
-        save_property_for_case(case.id, property_data)
+        save_property_for_case(case.id, raw_property_data)
+        property_data = normalize_property_payload(raw_property_data)
     except HTTPException as exc:
         detail = exc.detail
         property_error = detail if isinstance(detail, str) else str(detail)
@@ -805,6 +981,12 @@ def property_lookup_case(request: Request, case_id: int, db: Session = Depends(g
         property_data = load_property_for_case(case_id)
 
     offer = compute_offer_70(case.arv or 0, case.rehab or 0, case.closing_costs or 0)
+    rehab_condition = getattr(case, "rehab_condition", "") or "Good"
+    property_overrides = _parse_property_overrides(case)
+    rehab_suggested = _estimate_rehab_from_property(
+        property_data, rehab_condition, property_overrides
+    )
+    flip_offer = compute_offer_80(case.arv or 0, case.rehab or 0, case.closing_costs or 0)
 
     return templates.TemplateResponse(
         "case_detail.html",
@@ -812,12 +994,16 @@ def property_lookup_case(request: Request, case_id: int, db: Session = Depends(g
             "request": request,
             "case": case,
             "offer_70": offer,
+            "offer_80": flip_offer,
             "active_parcel_id": case.parcel_id,
             "notes": notes,
             "skip_trace": skip_trace,
             "skip_trace_error": skip_trace_error,
             "property_data": property_data,
             "property_error": property_error,
+            "rehab_condition": rehab_condition,
+            "rehab_suggested": rehab_suggested,
+            "property_overrides": property_overrides,
         },
     )
 
@@ -920,6 +1106,8 @@ def update_case_list_page(request: Request):
 async def update_cases(
     request: Request,
     since_days: int = Form(7),
+    run_pasco: Optional[int] = Form(None),
+    run_pinellas: Optional[int] = Form(None),
 ):
     """
     Starts an async job that:
@@ -933,7 +1121,14 @@ async def update_cases(
     await progress_bus.publish(job_id, f"Queued job {job_id}…")
 
     # delegate the heavy lifting to the service
-    asyncio.create_task(run_update_cases_job(job_id, since_days))
+    asyncio.create_task(
+        run_update_cases_job(
+            job_id,
+            since_days,
+            run_pasco=bool(run_pasco),
+            run_pinellas=bool(run_pinellas),
+        )
+    )
 
     return RedirectResponse(
         url=request.url_for("update_progress_page", job_id=job_id),
@@ -991,6 +1186,46 @@ def case_report(case_id: int, db: Session = Depends(get_db)):
     Lightweight wrapper that delegates to app.services.report_service.
     """
     return generate_case_report(case_id, db)
+
+
+@app.post("/cases/reports/download")
+def download_case_reports(
+    ids: List[int] = Form(default=[]),
+    include_attachments: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+):
+    if not ids:
+        return RedirectResponse(url="/cases", status_code=303)
+
+    cases = db.query(Case).filter(Case.id.in_(ids)).all()
+    case_map = {c.id: c for c in cases}
+    include_docs = include_attachments == "1"
+
+    def _safe_name(raw: str) -> str:
+        s = (raw or "").strip()
+        if not s:
+            return ""
+        s = re.sub(r"[^A-Za-z0-9._-]+", "_", s)
+        return s.strip("_")
+
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
+        for cid in ids:
+            case = case_map.get(cid)
+            if not case:
+                continue
+            case_num = _safe_name(getattr(case, "case_number", "") or "")
+            file_name = f"case_{cid}.pdf" if not case_num else f"case_{cid}_{case_num}.pdf"
+            report_buf = build_case_report_bytes(cid, db, include_attachments=include_docs)
+            report_buf.seek(0)
+            zf.writestr(file_name, report_buf.read())
+
+    out.seek(0)
+    return StreamingResponse(
+        out,
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=case_reports.zip"},
+    )
 
 
 # ======================================================================
@@ -1174,6 +1409,64 @@ def add_note(case_id: int, content: str = Form(...), db: Session = Depends(get_d
     return RedirectResponse(url=f"/cases/{case_id}", status_code=303)
 
 
+@app.post("/cases/{case_id}/property-overrides")
+def update_property_overrides(
+    case_id: int,
+    property_type: Optional[str] = Form(None),
+    year_built: Optional[str] = Form(None),
+    sqft: Optional[str] = Form(None),
+    lot_size: Optional[str] = Form(None),
+    beds: Optional[str] = Form(None),
+    baths: Optional[str] = Form(None),
+    low_range: Optional[str] = Form(None),
+    high_range: Optional[str] = Form(None),
+    estimated_value: Optional[str] = Form(None),
+    assessed_value: Optional[str] = Form(None),
+    annual_taxes: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+):
+    case = db.query(Case).get(case_id)  # type: ignore[call-arg]
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    overrides = _parse_property_overrides(case)
+
+    def _set(key: str, val: Optional[str]) -> None:
+        if val is None:
+            return
+        v = val.strip()
+        if v:
+            overrides[key] = v
+        else:
+            overrides.pop(key, None)
+
+    _set("property_type", property_type)
+    _set("year_built", year_built)
+    _set("sqft", sqft)
+    _set("lot_size", lot_size)
+    _set("beds", beds)
+    _set("baths", baths)
+    _set("low_range", low_range)
+    _set("high_range", high_range)
+    _set("estimated_value", estimated_value)
+    _set("assessed_value", assessed_value)
+    _set("annual_taxes", annual_taxes)
+
+    case.property_overrides = json.dumps(overrides)
+    db.add(case)
+    db.commit()
+    return RedirectResponse(url=f"/cases/{case_id}", status_code=303)
+
+
+@app.get("/cases/{case_id}/notes/{note_id}/delete")
+def delete_note(case_id: int, note_id: int, db: Session = Depends(get_db)):
+    note = db.query(Note).filter(Note.id == note_id, Note.case_id == case_id).first()
+    if note:
+        db.delete(note)
+        db.commit()
+    return RedirectResponse(url=f"/cases/{case_id}", status_code=303)
+
+
 # ======================================================================
 # NEW: Outstanding Liens API
 # ======================================================================
@@ -1236,6 +1529,7 @@ def cases_list(
     page_size: int = Query(10, ge=5, le=100),
     show_archived: int = Query(0),
     case: str = Query("", alias="case"),
+    tag: str = Query(""),
     db: Session = Depends(get_db),
 ):
     qry = db.query(Case)
@@ -1244,7 +1538,90 @@ def cases_list(
         qry = qry.filter(text("(archived IS NULL OR archived = 0)"))
 
     if case:
-        qry = qry.filter(Case.case_number.contains(case))
+        qry = qry.filter(Case.address.contains(case))
+
+    def _as_float(val: object) -> float:
+        try:
+            if val is None:
+                return 0.0
+            if isinstance(val, (int, float)):
+                return float(val)
+            s = str(val).strip()
+            if not s:
+                return 0.0
+            cleaned = s.replace("$", "").replace(",", "")
+            return float(cleaned)
+        except Exception:
+            return 0.0
+
+    def _sum_liens(raw: object) -> float:
+        try:
+            liens = json.loads(raw) if isinstance(raw, str) else raw
+        except Exception:
+            liens = []
+        total = 0.0
+        if isinstance(liens, list):
+            for item in liens:
+                if not isinstance(item, dict):
+                    continue
+                amt = item.get("amount") or item.get("balance") or item.get("lien_amount")
+                total += _as_float(amt)
+        return round(total, 2)
+
+    tag_map = {
+        "Owner Occupied": "ownerOccupied",
+        "High Equity": "highEquity",
+        "Free & Clear": "freeAndClear",
+        "Absentee Owner": "absenteeOwner",
+        "Pre-foreclosure": "preforeclosure",
+        "Tax Default": "taxDefault",
+        "Vacant": "vacant",
+        "Has HOA": "hasHoa",
+        "Short Sale": "__short_sale__",
+    }
+    if tag == "Short Sale":
+        base_rows = (
+            qry.with_entities(
+                Case.id,
+                Case.arv,
+                Case.rehab,
+                Case.closing_costs,
+                Case.outstanding_liens,
+            )
+            .all()
+        )
+        short_sale_ids = []
+        for cid, arv_v, rehab_v, closing_v, liens_raw in base_rows:
+            liens_total = _sum_liens(liens_raw)
+            wholesale_offer = max(
+                0.0, (_as_float(arv_v) * 0.65) - _as_float(rehab_v) - _as_float(closing_v)
+            )
+            flip_rate = 0.85 if _as_float(arv_v) > 350000 else 0.80
+            flip_offer = max(
+                0.0, (_as_float(arv_v) * flip_rate) - _as_float(rehab_v) - _as_float(closing_v)
+            )
+            if liens_total and (wholesale_offer < liens_total or flip_offer < liens_total):
+                short_sale_ids.append(int(cid))
+        if short_sale_ids:
+            qry = qry.filter(Case.id.in_(short_sale_ids))
+        else:
+            qry = qry.filter(text("1=0"))
+    elif tag and tag in tag_map:
+        key = tag_map[tag]
+        pattern1 = f'%"{key}":true%'
+        pattern2 = f'%"{key}": true%'
+        rows = db.execute(
+            text(
+                "SELECT case_id FROM case_property "
+                "WHERE raw_json LIKE :p1 OR raw_json LIKE :p2"
+            ),
+            {"p1": pattern1, "p2": pattern2},
+        ).fetchall()
+        tag_case_ids = [int(r[0]) for r in rows]
+        if tag_case_ids:
+            qry = qry.filter(Case.id.in_(tag_case_ids))
+        else:
+            qry = qry.filter(text("1=0"))
     # page_size comes from query param (default 10)
     # Deterministic ordering: newest first
     qry = qry.order_by(Case.id.desc())
@@ -1298,6 +1675,64 @@ def cases_list(
             ]
         )
 
+    # Quick flags + short sale tags
+    quick_flags: dict[int, list[str]] = {}
+    short_sale: dict[int, bool] = {}
+
+    if case_ids:
+        # Quick flags from BatchData property payload
+        try:
+            placeholders = ",".join([":id" + str(i) for i in range(len(case_ids))])
+            params = {"id" + str(i): case_ids[i] for i in range(len(case_ids))}
+            rows = db.execute(
+                text(
+                    f"SELECT case_id, raw_json FROM case_property WHERE case_id IN ({placeholders})"
+                ),
+                params,
+            ).fetchall()
+            for cid, raw_json in rows:
+                if not raw_json:
+                    continue
+                try:
+                    payload = json.loads(raw_json)
+                    payload = normalize_property_payload(payload)
+                    props = (payload.get("results") or {}).get("properties") or []
+                    if not props:
+                        continue
+                    quick = props[0].get("quickLists") or {}
+                except Exception:
+                    continue
+
+                tags: list[str] = []
+                if quick.get("ownerOccupied"):
+                    tags.append("Owner Occupied")
+                if quick.get("highEquity"):
+                    tags.append("High Equity")
+                if quick.get("freeAndClear"):
+                    tags.append("Free & Clear")
+                if quick.get("absenteeOwner"):
+                    tags.append("Absentee Owner")
+                if quick.get("preforeclosure"):
+                    tags.append("Pre-foreclosure")
+                if quick.get("taxDefault"):
+                    tags.append("Tax Default")
+                if quick.get("vacant"):
+                    tags.append("Vacant")
+                if quick.get("hasHoa"):
+                    tags.append("Has HOA")
+                if tags:
+                    quick_flags[int(cid)] = tags
+        except Exception as e:
+            logger.warning("cases_list: could not compute quick_flags: %s", e)
+
+        # Short sale: liens exceed wholesale or flip offer
+        for c in cases:
+            liens_total = _sum_liens(getattr(c, "outstanding_liens", "[]"))
+            wholesale_offer = max(0.0, (_as_float(c.arv) * 0.65) - _as_float(c.rehab) - _as_float(c.closing_costs))
+            flip_rate = 0.85 if _as_float(c.arv) > 350000 else 0.80
+            flip_offer = max(0.0, (_as_float(c.arv) * flip_rate) - _as_float(c.rehab) - _as_float(c.closing_costs))
+            short_sale[c.id] = bool(liens_total and (wholesale_offer < liens_total or flip_offer < liens_total))
+
     
     # Skip Trace present (exists row in case_skiptrace)
     skiptrace_present = {}
@@ -1321,11 +1756,15 @@ def cases_list(
             "pagination": pagination,
             "show_archived": bool(show_archived),
             "search_query": case,
+            "tag_filter": tag,
+            "tag_options": list(tag_map.keys()),
             "page_size": page_size,
             "defendants_count": defendants_count,
             "notes_count": notes_count,
             "docs_present": docs_present,
             "skiptrace_present": skiptrace_present,
+            "quick_flags": quick_flags,
+            "short_sale": short_sale,
         },
     )
 
@@ -1384,6 +1823,10 @@ def export_cases(
         "rehab",
         "value_calc_path",
         "verified_complaint_path",
+        "skiptrace_owner_name",
+        "skiptrace_property_address",
+        "skiptrace_phones",
+        "skiptrace_emails",
     ]
 
     buf = io.StringIO()
@@ -1404,6 +1847,36 @@ def export_cases(
         address = (getattr(c, "address_override", None) or getattr(c, "address", "") or "").strip()
         outstanding = getattr(c, "outstanding_liens", None) or "[]"
 
+        skip = load_skiptrace_for_case(c.id)
+        skip_owner = ""
+        skip_addr = ""
+        skip_phones = []
+        skip_emails = []
+        try:
+            if skip and skip.get("results"):
+                result = skip["results"][0] or {}
+                person = (result.get("persons") or [{}])[0] or {}
+                prop_addr = result.get("propertyAddress") or {}
+                skip_owner = person.get("full_name") or ""
+                skip_addr = " ".join(
+                    p for p in [
+                        prop_addr.get("street"),
+                        prop_addr.get("city"),
+                        prop_addr.get("state"),
+                        prop_addr.get("postalCode"),
+                    ] if p
+                ).strip()
+                for ph in person.get("phones") or []:
+                    num = ph.get("number")
+                    if num:
+                        skip_phones.append(num)
+                for em in person.get("emails") or []:
+                    addr = em.get("email")
+                    if addr:
+                        skip_emails.append(addr)
+        except Exception:
+            pass
+
         writer.writerow([
             c.id,
             c.case_number or "",
@@ -1422,6 +1895,10 @@ def export_cases(
             getattr(c, "rehab", "") or "",
             getattr(c, "value_calc_path", "") or "",
             getattr(c, "verified_complaint_path", "") or "",
+            skip_owner,
+            skip_addr,
+            ";".join(skip_phones),
+            ";".join(skip_emails),
         ])
 
     buf.seek(0)
@@ -1430,6 +1907,387 @@ def export_cases(
         iter([buf.getvalue()]),
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
+    )
+
+
+@app.post("/cases/export_crm")
+def export_cases_crm(
+    request: Request,
+    ids: List[int] = Form(default=[]),
+    show_archived: int = Form(0),
+    case: str = Form("", alias="case"),
+    db: Session = Depends(get_db),
+):
+    qry = db.query(Case)
+
+    if not show_archived:
+        qry = qry.filter(text("(archived IS NULL OR archived = 0)"))
+
+    if case:
+        qry = qry.filter(Case.case_number.contains(case))
+    if ids:
+        qry = qry.filter(Case.id.in_(ids))
+
+    header = [
+        "STATUS",
+        "TAGS",
+        "CONTACT_TYPES",
+        "MOTIVATION_LEVEL",
+        "NAME",
+        "FIRST_NAME",
+        "LAST_NAME",
+        "EMAIL",
+        "PHONE_1_NUMBER",
+        "PHONE_1_PHONE_TYPE",
+        "PHONE_1_DESCRIPTION",
+        "PHONE_1_DO_NOT_CALL",
+        "PHONE_1_CONSENT_GIVEN",
+        "PHONE_2_NUMBER",
+        "PHONE_2_PHONE_TYPE",
+        "PHONE_2_DESCRIPTION",
+        "PHONE_2_DO_NOT_CALL",
+        "PHONE_2_CONSENT_GIVEN",
+        "PHONE_3_NUMBER",
+        "PHONE_3_PHONE_TYPE",
+        "PHONE_3_DESCRIPTION",
+        "PHONE_3_DO_NOT_CALL",
+        "PHONE_3_CONSENT_GIVEN",
+        "MAILING_ADDRESS",
+        "MAILING_STREET_ADDRESS",
+        "MAILING_CITY",
+        "MAILING_STATE",
+        "MAILING_ZIP",
+        "COMPANY_NAME",
+        "COMPANY_ADDRESS",
+        "PROPERTY_FULL_ADDRESS",
+        "PROPERTY_STREET_ADDRESS",
+        "PROPERTY_CITY",
+        "PROPERTY_STATE",
+        "PROPERTY_ZIP",
+        "PROPERTY_COUNTY",
+        "PROPERTY_APN",
+        "PROPERTY_LEGAL_DESCRIPTION",
+        "PROPERTY_FULL_ADDRESS_MAP_URL",
+        "PROPERTY_OCCUPANCY",
+        "PROPERTY_BEDROOMS",
+        "PROPERTY_BATHROOMS",
+        "PROPERTY_SQFT",
+        "PROPERTY_LOT_SIZE_SQFT",
+        "PROPERTY_YEAR",
+        "PROPERTY_NOTES",
+        "OWNER_IS_ABSENTEE",
+        "OWNER_2_FULL_NAME",
+        "OWNER_2_LAST_NAME",
+        "OWNER_2_MIDDLE_NAME",
+        "OWNER_2_FIRST_NAME",
+        "OWNER_2_ADDRESS",
+        "OWNER_2_PHONE",
+        "OWNER_2_EMAIL",
+        "OWNER_2_NOTES",
+        "OWNER_2_IS_SPOUSE",
+        "SPOUSE_NAME",
+        "SPOUSE_MAILING_ADDRESS",
+        "SPOUSE_EMAIL",
+        "SPOUSE_PHONE",
+        "SPOUSE_NOTES",
+        "PROPERTY_VALUE",
+        "PROPERTY_EQUITY",
+        "PROPERTY_REPAIR_ESTIMATE",
+        "PROPERTY_LAST_SALE_AMOUNT",
+        "PROPERTY_LAST_SALE_DT",
+        "PROPERTY_LAST_SALE_IS_CASH",
+        "OFFER_AMOUNT",
+        "OFFER_CONTRACT_DT",
+        "OFFER_ACCEPTED_DT",
+        "OFFER_REJECTED_DT",
+        "OFFER_NOTES",
+        "OFFER_UPLOAD_ID",
+        "PROPERTY_IS_LISTED",
+        "PROPERTY_LISTED_DT",
+        "PROPERTY_LISTING_URL",
+        "PROPERTY_LISTING_AGT_NAME",
+        "PROPERTY_LISTING_AGT_PHONE",
+        "PROPERTY_LISTING_AGT_EMAIL",
+        "PROPERTY_LISTING_AMOUNT",
+        "PROPERTY_LISTING_NOTES",
+        "NEEDS_SALE_BY_DT",
+        "REASON_FOR_SELLING",
+        "PROPERTY_SELLER_LOWEST_AMOUNT",
+        "PROPERTY_SELLER_ESTIMATED_VALUE",
+        "PROPERTY_SELLER_VALUE_RATIONALE",
+        "MOTIVATION_NOTES",
+        "MORTGAGE_BANK_NAME",
+        "MORTGAGE_BANK_CONTACT_NAME",
+        "MORTGAGE_BANK_CONTACT_EMAIL",
+        "MORTGAGE_BANK_CONTACT_PHONE",
+        "MORTGAGE_PAYMENT_ADDRESS",
+        "MORTGAGE_AMOUNT_MONTHLY",
+        "MORTGAGE_AMOUNT_REMAINING",
+        "MORTGAGE_BEHIND_MONTHS",
+        "MORTGAGE_BEHIND_AMOUNT",
+        "MORTGAGE_BANK_NOTES",
+        "FORECLOSURE_DEFAULT_AMOUNT",
+        "FORECLOSURE_ATTORNEY_NAME",
+        "FORECLOSURE_CASE_NUMBER",
+        "FORECLOSURE_DOCUMENT_NUMBER",
+        "FORECLOSURE_DOCUMENT_TYPE",
+        "FORECLOSURE_EFFECTIVE_DT",
+        "FORECLOSURE_LENDER_ADDRESS",
+        "FORECLOSURE_LENDER_NAME",
+        "FORECLOSURE_LIEN_POSITION",
+        "FORECLOSURE_ORIGINAL_DOCUMENT_NUM",
+        "FORECLOSURE_ORIGINAL_LENDER",
+        "FORECLOSURE_ORIGINAL_MORTGAGE_AMT",
+        "FORECLOSURE_ORIGINAL_RECORDING_DT",
+        "FORECLOSURE_PLAINTIFF",
+        "FORECLOSURE_RECENT_ADDED_DT",
+        "FORECLOSURE_RECORDING_DT",
+        "FORECLOSURE_TRUSTEE_NAME",
+        "FORECLOSURE_TRUSTEE_ADDRESS",
+        "FORECLOSURE_TRUSTEE_SALE_NUMBER",
+        "FORECLOSURE_UNPAID_BALANCE",
+        "FORECLOSURE_NOTES",
+        "REPRESENTATIVE_NAME",
+        "REPRESENTATIVE_ADDRESS",
+        "REPRESENTATIVE_PHONE",
+        "REPRESENTATIVE_EMAIL",
+        "REPRESENTATIVE_NOTES",
+        "ATTORNEY_NAME",
+        "ATTORNEY_ADDRESS",
+        "ATTORNEY_PHONE",
+        "ATTORNEY_EMAIL",
+        "ATTORNEY_NOTES",
+        "NOTES",
+    ]
+
+    def _split_name(full: str) -> tuple[str, str]:
+        parts = [p for p in (full or "").split() if p]
+        if not parts:
+            return "", ""
+        if len(parts) == 1:
+            return parts[0], ""
+        return parts[0], parts[-1]
+
+    def _stringify(val: object) -> str:
+        if val is None:
+            return ""
+        return str(val)
+
+    rows = qry.order_by(Case.filing_datetime.desc()).all()
+    buf = io.StringIO()
+    writer = _csv.writer(buf, lineterminator="\n")
+    writer.writerow(header)
+
+    for c in rows:
+        skip = load_skiptrace_for_case(c.id)
+        owner_name = ""
+        email = ""
+        phones = []
+        mailing = {}
+
+        if skip and skip.get("results"):
+            result = skip["results"][0] or {}
+            person = (result.get("persons") or [{}])[0] or {}
+            owner_name = person.get("full_name") or ""
+            for ph in person.get("phones") or []:
+                num = ph.get("number")
+                if num:
+                    phones.append({"number": num, "type": ph.get("type") or ""})
+            for em in person.get("emails") or []:
+                addr = em.get("email")
+                if addr:
+                    email = addr
+                    break
+            mailing = result.get("propertyAddress") or {}
+
+        first_name, last_name = _split_name(owner_name)
+
+        prop = load_property_for_case(c.id) or {}
+        props = (prop.get("results") or {}).get("properties") or []
+        p = props[0] if props else {}
+        addr = p.get("address") or {}
+        listing = p.get("listing") or {}
+        general = p.get("general") or {}
+        building = p.get("building") or {}
+        lot = p.get("lot") or {}
+        quick = p.get("quickLists") or {}
+
+        ov_raw = getattr(c, "property_overrides", "") or "{}"
+        try:
+            ov = json.loads(ov_raw) if isinstance(ov_raw, str) else {}
+        except Exception:
+            ov = {}
+
+        prop_street = (c.address_override or c.address or addr.get("street") or addr.get("streetNoUnit") or "").strip()
+        prop_city = (addr.get("city") or "").strip()
+        prop_state = (addr.get("state") or "").strip()
+        prop_zip = (addr.get("zip") or "").strip()
+        prop_county = (addr.get("county") or "").strip()
+
+        sqft = ov.get("sqft") or building.get("livingAreaSqft") or general.get("buildingAreaSqft") or listing.get("totalBuildingAreaSquareFeet")
+        lot_sqft = lot.get("lotSizeSqft") or listing.get("lotSizeSquareFeet") or ""
+        year_built = ov.get("year_built") or general.get("yearBuilt") or p.get("yearBuilt") or listing.get("yearBuilt")
+        beds = ov.get("beds") or building.get("bedrooms") or listing.get("bedroomCount") or ""
+        baths = ov.get("baths") or building.get("totalBathrooms") or listing.get("bathroomCount") or ""
+
+        tags = []
+        if quick.get("ownerOccupied"):
+            tags.append("Owner Occupied")
+        if quick.get("highEquity"):
+            tags.append("High Equity")
+        if quick.get("freeAndClear"):
+            tags.append("Free & Clear")
+        if quick.get("absenteeOwner"):
+            tags.append("Absentee Owner")
+        if quick.get("preforeclosure"):
+            tags.append("Pre-foreclosure")
+        if quick.get("taxDefault"):
+            tags.append("Tax Default")
+        if quick.get("vacant"):
+            tags.append("Vacant")
+        if quick.get("hasHoa"):
+            tags.append("Has HOA")
+
+        phones += [{"number": "", "type": ""}] * (3 - len(phones))
+
+        writer.writerow([
+            "New",
+            ";".join(tags),
+            "",
+            "",
+            owner_name,
+            first_name,
+            last_name,
+            email,
+            _stringify(phones[0]["number"]),
+            _stringify(phones[0]["type"]),
+            "",
+            "",
+            "",
+            _stringify(phones[1]["number"]),
+            _stringify(phones[1]["type"]),
+            "",
+            "",
+            "",
+            _stringify(phones[2]["number"]),
+            _stringify(phones[2]["type"]),
+            "",
+            "",
+            "",
+            " ".join(p for p in [mailing.get("street"), mailing.get("city"), mailing.get("state"), mailing.get("postalCode")] if p),
+            _stringify(mailing.get("street")),
+            _stringify(mailing.get("city")),
+            _stringify(mailing.get("state")),
+            _stringify(mailing.get("postalCode")),
+            "",
+            "",
+            " ".join(p for p in [prop_street, prop_city, prop_state, prop_zip] if p),
+            prop_street,
+            prop_city,
+            prop_state,
+            prop_zip,
+            prop_county,
+            getattr(c, "parcel_id", "") or "",
+            "",
+            "",
+            "",
+            _stringify(beds),
+            _stringify(baths),
+            _stringify(sqft),
+            _stringify(lot_sqft),
+            _stringify(year_built),
+            "",
+            "true" if quick.get("absenteeOwner") else "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            _stringify(ov.get("estimated_value") or ""),
+            "",
+            _stringify(getattr(c, "rehab", "") or ""),
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+        ])
+
+    buf.seek(0)
+    filename = f"crm_export_{_dt.datetime.now().strftime('%Y-%m-%d')}.csv"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

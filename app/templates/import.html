@@ -2,10 +2,20 @@
 {% extends "base.html" %}
 {% block content %}
 <h2>Update Case List</h2>
-<p>Choose how many days back to pull from the Pasco Subscriber portal and then import the results.</p>
+<p>Choose how many days back to pull from the county portals and then import the results.</p>
 <form method="post" action="/update_cases">
   <label for="since_days">Days to scrape</label>
   <input id="since_days" name="since_days" type="number" min="0" step="1" value="7" />
+  <div style="margin-top:8px;">
+    <label style="margin-right:12px;">
+      <input type="checkbox" name="run_pasco" value="1" checked>
+      Pasco
+    </label>
+    <label>
+      <input type="checkbox" name="run_pinellas" value="1" checked>
+      Pinellas
+    </label>
+  </div>
   <button type="submit">Update</button>
   <p class="muted">You’ll see a live progress log and be redirected when finished.</p>
 </form>
