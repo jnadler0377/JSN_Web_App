@@ -1,442 +1,466 @@
-{# app/templates/cases/_case_property_tab.html #}
-
-<div id="tab-property" class="tab-content">
-  <section class="property-tab">
+{# app/templates/cases/_case_property_tab.html #}
+
+<style>
+.property-section {
+    background: var(--panel);
+    border-radius: 10px;
+    padding: 1.5rem;
+    border: 1px solid #263043;
+    margin-bottom: 1.5rem;
+}
+
+.property-section h3 {
+    margin: 0 0 1rem 0;
+    color: var(--text);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.property-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1rem;
+}
+
+.property-field {
+    display: flex;
+    flex-direction: column;
+}
+
+.property-field label {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-bottom: 0.25rem;
+}
+
+.property-field .value {
+    color: var(--text);
+    padding: 0.5rem;
+    background: var(--bg);
+    border-radius: 6px;
+    border: 1px solid #263043;
+}
+
+.property-field input,
+.property-field select {
+    padding: 0.5rem;
+    background: var(--bg);
+    border: 1px solid #263043;
+    border-radius: 6px;
+    color: var(--text);
+}
+
+.edit-mode .property-field .value {
+    display: none;
+}
+
+.edit-mode .property-field input,
+.edit-mode .property-field select {
+    display: block;
+}
+
+.property-field input,
+.property-field select {
+    display: none;
+}
+
+.flag-badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    background: var(--acc);
+    color: white;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    margin-right: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.flag-badge.false {
+    background: #334155;
+    color: var(--muted);
+}
+
+.history-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+}
+
+.history-table th,
+.history-table td {
+    padding: 0.75rem;
+    text-align: left;
+    border-bottom: 1px solid #263043;
+}
+
+.history-table th {
+    background: #0f1629;
+    color: var(--muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+}
+
+.no-data {
+    text-align: center;
+    padding: 2rem;
+    color: var(--muted);
+}
+</style>
+
+{% if property_data %}
+
+<!-- Owner Information -->
+<div class="property-section">
     <h3>
-      Property Profile
-      <a href="#" onclick="togglePropertyEdit(true); return false;" class="inline-edit-link">edit</a>
+        👤 Owner Information
+        <button type="button" class="btn" onclick="toggleEditMode('owner-section')">Edit</button>
     </h3>
-
-    {% if property_error %}
-      <p class="property-error">{{ property_error }}</p>
-    {% endif %}
-
-    {% set ov = property_overrides or {} %}
+    <form method="post" action="/cases/{{ case.id }}/property/update-owner" id="owner-section">
+        
+        {% if property_data.owners and property_data.owners|length > 0 %}
+            
+            {# List all owner names #}
+            {% for owner in property_data.owners %}
+            <div class="property-field" style="margin-bottom: 1rem;">
+                <label>Owner {{ loop.index }}</label>
+                <div class="value">{{ owner.fullName or 'N/A' }}</div>
+                <input type="text" name="owner_name_{{ loop.index }}" value="{{ owner.fullName or '' }}">
+            </div>
+            {% endfor %}
+            
+            {# Single shared mailing address (use first owner's address) #}
+            <h4 style="margin: 2rem 0 1rem 0; padding-top: 1.5rem; border-top: 1px solid #263043;">
+                Mailing Address
+            </h4>
+            
+            {% set shared_address = property_data.owners[0].mailingAddress %}
+            
+            <div class="property-grid">
+                <div class="property-field">
+                    <label>Street</label>
+                    <div class="value">{{ shared_address.street or 'N/A' }}</div>
+                    <input type="text" name="mailing_street" value="{{ shared_address.street or '' }}">
+                </div>
+                <div class="property-field">
+                    <label>City</label>
+                    <div class="value">{{ shared_address.city or 'N/A' }}</div>
+                    <input type="text" name="mailing_city" value="{{ shared_address.city or '' }}">
+                </div>
+                <div class="property-field">
+                    <label>State</label>
+                    <div class="value">{{ shared_address.state or 'N/A' }}</div>
+                    <input type="text" name="mailing_state" value="{{ shared_address.state or '' }}">
+                </div>
+                <div class="property-field">
+                    <label>ZIP Code</label>
+                    <div class="value">{{ shared_address.zipCode or 'N/A' }}</div>
+                    <input type="text" name="mailing_zip" value="{{ shared_address.zipCode or '' }}">
+                </div>
+                <div class="property-field">
+                    <label>County</label>
+                    <div class="value">{{ shared_address.county or 'N/A' }}</div>
+                    <input type="text" name="mailing_county" value="{{ shared_address.county or '' }}">
+                </div>
+            </div>
+            
+            <input type="hidden" name="owner_count" value="{{ property_data.owners|length }}">
+            
+        {% else %}
+            {# Fallback for no owners data #}
+            <div class="property-field">
+                <label>Owner</label>
+                <div class="value">N/A</div>
+            </div>
+        {% endif %}
+        
+        <button type="submit" class="btn" style="margin-top: 1rem; display: none;">Save Changes</button>
+    </form>
+</div>
 
-    <div id="propertyEdit" style="display:none; margin:0.5rem 0 1rem 0;">
-      <form method="post" action="/cases/{{ case.id }}/property-overrides">
-        <div class="grid">
-          <div>
-            <label>Property Type</label>
-            <input type="text" name="property_type" value="{{ ov.get('property_type','') }}">
-          </div>
-          <div>
-            <label>Year Built</label>
-            <input type="text" name="year_built" value="{{ ov.get('year_built','') }}">
-          </div>
-          <div>
-            <label>Square Footage</label>
-            <input type="text" name="sqft" value="{{ ov.get('sqft','') }}">
-          </div>
-          <div>
-            <label>Lot Size</label>
-            <input type="text" name="lot_size" value="{{ ov.get('lot_size','') }}">
-          </div>
-          <div>
-            <label>Beds</label>
-            <input type="text" name="beds" value="{{ ov.get('beds','') }}">
-          </div>
-          <div>
-            <label>Baths</label>
-            <input type="text" name="baths" value="{{ ov.get('baths','') }}">
-          </div>
-          <div>
-            <label>Low Range</label>
-            <input type="text" name="low_range" value="{{ ov.get('low_range','') }}">
-          </div>
-          <div>
-            <label>High Range</label>
-            <input type="text" name="high_range" value="{{ ov.get('high_range','') }}">
-          </div>
-          <div>
-            <label>Estimated Value (AVM)</label>
-            <input type="text" name="estimated_value" value="{{ ov.get('estimated_value','') }}">
-          </div>
-          <div>
-            <label>Assessed Value</label>
-            <input type="text" name="assessed_value" value="{{ ov.get('assessed_value','') }}">
-          </div>
-          <div>
-            <label>Annual Taxes</label>
-            <input type="text" name="annual_taxes" value="{{ ov.get('annual_taxes','') }}">
-          </div>
-        </div>
-        <div style="margin-top:0.5rem;">
-          <button class="btn" type="submit">Save</button>
-          <button class="btn" type="button" onclick="togglePropertyEdit(false)">Cancel</button>
-        </div>
-      </form>
+<!-- QuickList Flags -->
+{% if property_data.quickList %}
+<div class="property-section">
+    <h3>🏷️ Property Flags</h3>
+    <div>
+        {% for key, value in property_data.quickList.items() %}
+            <span class="flag-badge {% if not value %}false{% endif %}">
+                {{ key | replace('_', ' ') | title }}: {{ '✓' if value else '✗' }}
+            </span>
+        {% endfor %}
     </div>
+</div>
+{% endif %}
 
-    {% if property_data and property_data.get('results') and property_data['results'].get('properties') %}
-      {% set props = property_data['results']['properties'] %}
-      {% set p = props[0] %}
-
-      {# Normalize nested dicts so missing keys don't explode #}
-      {% set addr          = p.get('address')          or {} %}
-      {% set valuation     = p.get('valuation')        or {} %}
-      {% set assessment    = p.get('assessment')       or {} %}
-      {% set tax           = p.get('tax')              or {} %}
-      {% set general       = p.get('general')          or {} %}
-      {% set lot           = p.get('lot')              or {} %}
-      {% set building      = p.get('building')         or {} %}
-      {% set listing       = p.get('listing')          or {} %} 
-      {% set open_lien     = p.get('openLien')         or {} %}
-      {% set mortgage_hist = p.get('mortgageHistory')  or [] %}
-      {% set owner         = p.get('owner')            or {} %}
-      {% set owner_mail    = owner.get('mailingAddress') or {} %}
-      {% set quick         = p.get('quickLists')       or {} %}
-      {% set meta          = p.get('meta')             or {} %}
-
-      <div class="prop-grid">
-        <!-- Card 1: Address & Basic Info -->
-        <div class="prop-card">
-          <h4>Address &amp; Basic Info</h4>
-
-          <p>
-            <strong>Street:</strong>
-            {% if addr.street is defined %}
-              {{ addr.street }}
-            {% elif addr.streetNoUnit is defined %}
-              {{ addr.streetNoUnit }}
-            {% else %}
-              ???
-            {% endif %}
-          </p>
-
-          <p>
-            <strong>City / State:</strong>
-            {% if addr.city is defined or addr.state is defined %}
-              {{ addr.city or '' }}{% if addr.city and addr.state %}, {% endif %}{{ addr.state or '' }}
-            {% else %}
-              ???
-            {% endif %}
-          </p>
-
-          <p>
-            <strong>ZIP:</strong>
-            {% if addr.zip is defined %}
-              {{ addr.zip }}{% if addr.zipPlus4 is defined %}-{{ addr.zipPlus4 }}{% endif %}
-            {% else %}
-              ???
-            {% endif %}
-          </p>
-
-          <p>
-            <strong>County:</strong>
-            {% if addr.county is defined %}
-              {{ addr.county }}
-            {% else %}
-              ???
-            {% endif %}
-          </p>
-
-          <p>
-            <strong>Latitude / Longitude:</strong>
-            {% if addr.latitude is defined and addr.longitude is defined %}
-              {{ '%.6f'|format(addr.latitude) }}, {{ '%.6f'|format(addr.longitude) }}
-            {% else %}
-              ???
-            {% endif %}
-          </p>
-
-          <p>
-            <strong>Property Type:</strong>
-            {% if ov.get('property_type') %}
-              {{ ov.get('property_type') }}
-            {% elif general.propertyTypeDetail is defined and general.propertyTypeDetail %}
-              {{ general.propertyTypeDetail }}
-            {% elif general.propertyTypeCategory is defined and general.propertyTypeCategory %}
-              {{ general.propertyTypeCategory }}
-            {% elif listing.propertyType is defined and listing.propertyType %}
-              {{ listing.propertyType }}
-            {% else %}
-              ???
-            {% endif %}
-          </p>
-
-          <p>
-            <strong>Year Built:</strong>
-            {% if ov.get('year_built') %}
-              {{ ov.get('year_built') }}
-            {% elif general.yearBuilt is defined %}
-              {{ general.yearBuilt }}
-            {% elif p.yearBuilt is defined %}
-              {{ p.yearBuilt }}
-            {% elif listing.yearBuilt is defined %}
-              {{ listing.yearBuilt }}
-            {% else %}
-              ???
-            {% endif %}
-          </p>
-
-          <p>
-            <strong>Square Footage (Living):</strong>
-            {% if ov.get('sqft') %}
-              {{ ov.get('sqft') }}
-            {% elif building.livingAreaSqft is defined %}
-              {{ '{:,.0f}'.format(building.livingAreaSqft) }}
-            {% elif general.buildingAreaSqft is defined %}
-              {{ '{:,.0f}'.format(general.buildingAreaSqft) }}
-            {% elif listing.totalBuildingAreaSquareFeet is defined %}
-              {{ '{:,.0f}'.format(listing.totalBuildingAreaSquareFeet) }}
-            {% else %}
-              ???
-            {% endif %}
-          </p>
-
-          <p>
-            <strong>Lot Size:</strong>
-            {% if ov.get('lot_size') %}
-              {{ ov.get('lot_size') }}
-            {% elif lot.lotSizeAcres is defined %}
-              {{ '%.3f'|format(lot.lotSizeAcres) }} acres
-            {% elif lot.lotSizeSqft is defined %}
-              {{ '{:,.0f}'.format(lot.lotSizeSqft) }} sqft
-            {% elif listing.lotSizeSquareFeet is defined %}
-              {{ '{:,.0f}'.format(listing.lotSizeSquareFeet) }} sqft
-            {% else %}
-              ???
-            {% endif %}
-          </p>
-
-          <p>
-            <strong>Beds / Baths:</strong>
-            {% if ov.get('beds') or ov.get('baths') %}
-              {{ ov.get('beds') }} BR / {{ ov.get('baths') }} BA
-            {% elif building.bedrooms is defined or building.totalBathrooms is defined %}
-              {{ building.bedrooms or '???' }} BR / {{ building.totalBathrooms or '???' }} BA
-            {% elif listing.bedroomCount is defined or listing.bathroomCount is defined %}
-              {{ listing.bedroomCount or '???' }} BR / {{ listing.bathroomCount or '???' }} BA
-            {% else %}
-              ???
-            {% endif %}
-          </p>
-        </div>
-
-        <!-- Card 2: Valuation & Tax -->
-        <div class="prop-card">
-          <h4>Valuation &amp; Tax</h4>
-
-          <p>
-            <strong>Estimated Value (AVM):</strong>
-            {% if ov.get('estimated_value') %}
-              ${{ ov.get('estimated_value') }}
-            {% elif valuation.estimatedValue is defined %}
-              ${{ '{:,.0f}'.format(valuation.estimatedValue) }}
-            {% else %}
-              ???
-            {% endif %}
-          </p>
-
-          <p>
-            <strong>Low / High Range:</strong>
-            {% if ov.get('low_range') or ov.get('high_range') %}
-              {% if ov.get('low_range') %}
-                ${{ ov.get('low_range') }}
-              {% else %}
-                ??"
-              {% endif %}
-              ??"
-              {% if ov.get('high_range') %}
-                ${{ ov.get('high_range') }}
-              {% else %}
-                ??"
-              {% endif %}
-            {% elif valuation.lowRangeValue is defined or valuation.highRangeValue is defined %}
-              {% if valuation.lowRangeValue is defined %}
-                ${{ '{:,.0f}'.format(valuation.lowRangeValue) }}
-              {% else %}
-                ???
-              {% endif %}
-              ???
-              {% if valuation.highRangeValue is defined %}
-                ${{ '{:,.0f}'.format(valuation.highRangeValue) }}
-              {% else %}
-                ???
-              {% endif %}
-            {% elif listing.minListPrice is defined or listing.maxListPrice is defined %}
-              {% if listing.minListPrice is defined %}
-                ${{ '{:,.0f}'.format(listing.minListPrice) }}
-              {% else %}
-                ???
-              {% endif %}
-              ???
-              {% if listing.maxListPrice is defined %}
-                ${{ '{:,.0f}'.format(listing.maxListPrice) }}
-              {% else %}
-                ???
-              {% endif %}
-            {% else %}
-              ???
-            {% endif %}
-          </p>
-
-          <p>
-            <strong>Confidence Score:</strong>
-            {% if valuation.confidenceScore is defined %}
-              {{ valuation.confidenceScore }}%
-            {% else %}
-              ???
-            {% endif %}
-          </p>
-
-          <p>
-            <strong>Assessed Value:</strong>
-            {% if ov.get('assessed_value') %}
-              ${{ ov.get('assessed_value') }}
-            {% elif assessment.totalAssessedValue is defined %}
-              ${{ '{:,.0f}'.format(assessment.totalAssessedValue) }}
-              {% if assessment.assessmentYear is defined %}
-                (Tax Year {{ assessment.assessmentYear }})
-              {% endif %}
-            {% else %}
-              ???
-            {% endif %}
-          </p>
-
-          <p>
-            <strong>Annual Taxes:</strong>
-            {% if ov.get('annual_taxes') %}
-              ${{ ov.get('annual_taxes') }}
-            {% elif tax.taxAmount is defined %}
-              ${{ '{:,.0f}'.format(tax.taxAmount) }}
-              {% if tax.taxYear is defined %}
-                (Tax Year {{ tax.taxYear }})
-              {% endif %}
-            {% else %}
-              ???
-            {% endif %}
-          </p>
-        </div>
-
-        <!-- Card 3: Liens & Mortgages -->
-        <div class="prop-card">
-          <h4>Liens &amp; Mortgages</h4>
-
-          <p>
-            <strong>Total Open Liens:</strong>
-            {% if open_lien.totalOpenLienBalance is defined %}
-              ${{ '{:,.0f}'.format(open_lien.totalOpenLienBalance) }}
-              {% if open_lien.totalOpenLienCount is defined %}
-                ({{ open_lien.totalOpenLienCount }} loans)
-              {% endif %}
-            {% else %}
-              ???
-            {% endif %}
-          </p>
-
-          <p>
-            <strong>Loan Types:</strong>
-            {% if open_lien.allLoanTypes is defined and open_lien.allLoanTypes %}
-              {{ open_lien.allLoanTypes|join(', ') }}
-            {% else %}
-              ???
-            {% endif %}
-          </p>
-
-          <p>
-            <strong>Most Recent Mortgage:</strong>
-            {% if mortgage_hist and mortgage_hist|length > 0 %}
-              {% set m = mortgage_hist[0] %}
-              {% if m.originalLoanAmount is defined %}
-                ${{ '{:,.0f}'.format(m.originalLoanAmount) }}
-              {% else %}
-                ???
-              {% endif %}
-              {% if m.loanType is defined and m.loanType %}
-                ({{ m.loanType }})
-              {% endif %}
-              {% if m.recordingDate is defined and m.recordingDate %}
-                <br><small>Recorded: {{ m.recordingDate[:10] }}</small>
-              {% endif %}
-            {% else %}
-              ???
-            {% endif %}
-          </p>
-        </div>
-
-        <!-- Card 4: Owner & Flags -->
-        <div class="prop-card">
-          <h4>Owner &amp; Flags</h4>
-
-          <p>
-            <strong>Owner:</strong>
-            {% if owner.fullName is defined and owner.fullName %}
-              {{ owner.fullName }}
-            {% elif owner.names is defined and owner.names %}
-              {{ owner.names[0].full or owner.names[0].first }}
-            {% else %}
-              ???
-            {% endif %}
-          </p>
-
-          <p>
-            <strong>Mailing Address:</strong>
-            {% if owner_mail.street is defined %}
-              {{ owner_mail.street }},
-              {{ owner_mail.city }},
-              {{ owner_mail.state }}
-              {{ owner_mail.zip }}
-            {% else %}
-              ???
-            {% endif %}
-          </p>
-
-          {# QuickList tags #}
-          {% set tags = [] %}
-          {% if quick.ownerOccupied %}{% set _ = tags.append('Owner Occupied') %}{% endif %}
-          {% if quick.highEquity %}{% set _ = tags.append('High Equity') %}{% endif %}
-          {% if quick.freeAndClear %}{% set _ = tags.append('Free & Clear') %}{% endif %}
-          {% if quick.absenteeOwner %}{% set _ = tags.append('Absentee Owner') %}{% endif %}
-          {% if quick.preforeclosure %}{% set _ = tags.append('Pre-foreclosure') %}{% endif %}
-          {% if quick.taxDefault %}{% set _ = tags.append('Tax Default') %}{% endif %}
-          {% if quick.vacant %}{% set _ = tags.append('Vacant') %}{% endif %}
-          {% if quick.hasHoa %}{% set _ = tags.append('Has HOA') %}{% endif %}
-
-          {% if tags %}
-            <p><strong>Quick Flags:</strong></p>
-            <p>
-              {% for t in tags %}
-                <span class="pill pill-tag">{{ t }}</span>
-              {% endfor %}
-            </p>
-          {% endif %}
-
-          {% if meta.propertyDateModified is defined %}
-            <p><small>Last Updated: {{ meta.propertyDateModified[:10] }}</small></p>
-          {% endif %}
-        </div>
-      </div>
-    {% else %}
-      <div class="prop-grid">
-        <div class="prop-card">
-          <h4>Manual Property Data</h4>
-          <p><strong>Property Type:</strong> {{ ov.get('property_type','') or '???' }}</p>
-          <p><strong>Year Built:</strong> {{ ov.get('year_built','') or '???' }}</p>
-          <p><strong>Square Footage:</strong> {{ ov.get('sqft','') or '???' }}</p>
-          <p><strong>Lot Size:</strong> {{ ov.get('lot_size','') or '???' }}</p>
-          <p><strong>Beds:</strong> {{ ov.get('beds','') or '???' }}</p>
-          <p><strong>Baths:</strong> {{ ov.get('baths','') or '???' }}</p>
-          <p><strong>Low Range:</strong> {{ ov.get('low_range','') or '???' }}</p>
-          <p><strong>High Range:</strong> {{ ov.get('high_range','') or '???' }}</p>
-          <p><strong>Estimated Value (AVM):</strong> {{ ov.get('estimated_value','') or '???' }}</p>
-          <p><strong>Assessed Value:</strong> {{ ov.get('assessed_value','') or '???' }}</p>
-          <p><strong>Annual Taxes:</strong> {{ ov.get('annual_taxes','') or '???' }}</p>
+<!-- Valuation -->
+{% if property_data.valuation %}
+<div class="property-section">
+    <h3>
+        💰 Valuation
+        <button type="button" class="btn" onclick="toggleEditMode('valuation-section')">Edit</button>
+    </h3>
+    <form method="post" action="/cases/{{ case.id }}/property/update-valuation" id="valuation-section">
+        <div class="property-grid">
+            <div class="property-field">
+                <label>Estimated Value</label>
+                <div class="value">${{ "{:,.0f}".format(property_data.valuation.estimatedValue) if property_data.valuation.estimatedValue else 'N/A' }}</div>
+                <input type="number" name="estimated_value" step="0.01" value="{{ property_data.valuation.estimatedValue or '' }}">
+            </div>
+            <div class="property-field">
+    <label>As of Date</label>
+    <div class="value">{{ property_data.valuation.asOfDate | format_date }}</div>
+    <input type="date" name="as_of_date" value="{{ property_data.valuation.asOfDate or '' }}">
+</div>
+            <div class="property-field">
+                <label>Confidence Score</label>
+                <div class="value">{{ property_data.valuation.confidenceScore or 'N/A' }}</div>
+                <input type="number" name="confidence_score" step="0.01" value="{{ property_data.valuation.confidenceScore or '' }}">
+            </div>
+            <div class="property-field">
+                <label>Equity Percent</label>
+                <div class="value">{{ "{:.1f}%".format(property_data.valuation.equityPercent) if property_data.valuation.equityPercent else 'N/A' }}</div>
+                <input type="number" name="equity_percent" step="0.01" value="{{ property_data.valuation.equityPercent or '' }}">
+            </div>
+            <div class="property-field">
+                <label>LTV (Loan to Value)</label>
+                <div class="value">{{ "{:.1f}%".format(property_data.valuation.ltv) if property_data.valuation.ltv else 'N/A' }}</div>
+                <input type="number" name="ltv" step="0.01" value="{{ property_data.valuation.ltv or '' }}">
+            </div>
         </div>
-      </div>
+        <button type="submit" class="btn" style="margin-top: 1rem; display: none;">Save Changes</button>
+    </form>
+</div>
+{% endif %}
 
-      <p><em>No BatchData property results stored yet for this case.</em></p>
-    {% endif %}
-
-  </section>
-</div>
-
-
-
-
-
-
-
-
-
+<!-- Intel -->
+{% if property_data.intel %}
+<div class="property-section">
+    <h3>📊 Intelligence Data</h3>
+    <div class="property-grid">
+        <div class="property-field">
+            <label>Sale Propensity</label>
+            <div class="value">{{ property_data.intel.salePropensity or 'N/A' }}</div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Demographics -->
+{% if property_data.demographics %}
+<div class="property-section">
+    <h3>
+        👥 Demographics
+        <button type="button" class="btn" onclick="toggleEditMode('demographics-section')">Edit</button>
+    </h3>
+    <form method="post" action="/cases/{{ case.id }}/property/update-demographics" id="demographics-section">
+        <div class="property-grid">
+            <div class="property-field">
+                <label>Age</label>
+                <div class="value">{{ property_data.demographics.age or 'N/A' }}</div>
+                <input type="number" name="age" value="{{ property_data.demographics.age or '' }}">
+            </div>
+            <div class="property-field">
+                <label>Gender</label>
+                <div class="value">{{ property_data.demographics.gender or 'N/A' }}</div>
+                <select name="gender">
+                    <option value="">Unknown</option>
+                    <option value="Male" {% if property_data.demographics.gender == 'Male' %}selected{% endif %}>Male</option>
+                    <option value="Female" {% if property_data.demographics.gender == 'Female' %}selected{% endif %}>Female</option>
+                </select>
+            </div>
+            <div class="property-field">
+                <label>Marital Status</label>
+                <div class="value">{{ property_data.demographics.maritalStatus or 'N/A' }}</div>
+                <input type="text" name="marital_status" value="{{ property_data.demographics.maritalStatus or '' }}">
+            </div>
+            <div class="property-field">
+                <label>Children Count</label>
+                <div class="value">{{ property_data.demographics.childCount or 'N/A' }}</div>
+                <input type="number" name="child_count" value="{{ property_data.demographics.childCount or '' }}">
+            </div>
+            <div class="property-field">
+                <label>Income</label>
+                <div class="value">${{ "{:,.0f}".format(property_data.demographics.income) if property_data.demographics.income else 'N/A' }}</div>
+                <input type="number" name="income" step="1000" value="{{ property_data.demographics.income or '' }}">
+            </div>
+            <div class="property-field">
+                <label>Net Worth</label>
+                <div class="value">${{ "{:,.0f}".format(property_data.demographics.netWorth) if property_data.demographics.netWorth else 'N/A' }}</div>
+                <input type="number" name="net_worth" step="1000" value="{{ property_data.demographics.netWorth or '' }}">
+            </div>
+            <div class="property-field">
+                <label>Occupation</label>
+                <div class="value">{{ property_data.demographics.individualOccupation or 'N/A' }}</div>
+                <input type="text" name="occupation" value="{{ property_data.demographics.individualOccupation or '' }}">
+            </div>
+        </div>
+        <button type="submit" class="btn" style="margin-top: 1rem; display: none;">Save Changes</button>
+    </form>
+</div>
+{% endif %}
+
+<!-- Property Details -->
+{% if property_data.properties %}
+<div class="property-section">
+    <h3>🏠 Property Details</h3>
+    <div class="property-grid">
+        <div class="property-field">
+            <label>Street Address</label>
+            <div class="value">{{ property_data.properties.street or 'N/A' }}</div>
+        </div>
+        <div class="property-field">
+            <label>City</label>
+            <div class="value">{{ property_data.properties.city or 'N/A' }}</div>
+        </div>
+        <div class="property-field">
+            <label>State</label>
+            <div class="value">{{ property_data.properties.state or 'N/A' }}</div>
+        </div>
+        <div class="property-field">
+            <label>ZIP Code</label>
+            <div class="value">{{ property_data.properties.zipCode or 'N/A' }}</div>
+        </div>
+        <div class="property-field">
+            <label>County</label>
+            <div class="value">{{ property_data.properties.county or 'N/A' }}</div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- IDs -->
+{% if property_data.ids %}
+<div class="property-section">
+    <h3>🔢 Property IDs</h3>
+    <div class="property-grid">
+        <div class="property-field">
+            <label>APN (Assessor's Parcel Number)</label>
+            <div class="value">{{ property_data.ids.apn or 'N/A' }}</div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Mortgage History -->
+{% if property_data.mortgageHistory and property_data.mortgageHistory | length > 0 %}
+<div class="property-section">
+    <h3>🏦 Mortgage History</h3>
+    <div style="overflow-x: auto;">
+        <table class="history-table">
+            <thead>
+                <tr>
+                    <th>Document Date</th>
+                    <th>Lender</th>
+                    <th>Loan Amount</th>
+                    <th>Interest Rate</th>
+                    <th>Loan Type</th>
+                    <th>Due Date</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for mortgage in property_data.mortgageHistory %}
+                <tr>
+    <td>{{ mortgage.documentDate | format_date }}</td>
+    <td>{{ mortgage.lenderName or 'N/A' }}</td>
+    <td>${{ "{:,.0f}".format(mortgage.loanAmount) if mortgage.loanAmount else 'N/A' }}</td>
+    <td>{{ "{:.2f}%".format(mortgage.interestRate) if mortgage.interestRate else 'N/A' }}</td>
+    <td>{{ mortgage.loanType or 'N/A' }}</td>
+    <td>{{ mortgage.dueDate | format_date }}</td>
+</tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<!-- Deed History -->
+{% if property_data.deedHistory and property_data.deedHistory | length > 0 %}
+<div class="property-section">
+    <h3>📜 Deed History</h3>
+    <div style="overflow-x: auto;">
+        <table class="history-table">
+            <thead>
+                <tr>
+                    <th>Document Date</th>
+                    <th>Document Type</th>
+                    <th>Sale Price</th>
+                    <th>Buyers</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for deed in property_data.deedHistory %}
+                <tr>
+    <td>{{ deed.documentDate | format_date }}</td>
+    <td>{{ deed.documentType or 'N/A' }}</td>
+    <td>${{ "{:,.0f}".format(deed.salePrice) if deed.salePrice else 'N/A' }}</td>
+    <td>{{ deed.buyers or 'N/A' }}</td>
+</tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<!-- Foreclosure Info -->
+{% if property_data.foreclosure %}
+<div class="property-section">
+    <h3>⚖️ Foreclosure Information</h3>
+    <div class="property-grid">
+        <div class="property-field">
+            <label>Case Number</label>
+            <div class="value">{{ property_data.foreclosure.caseNumber or 'N/A' }}</div>
+        </div>
+        <div class="property-field">
+    <label>Filing Date</label>
+    <div class="value">{{ property_data.foreclosure.filingDate | format_date }}</div>
+</div>
+        <div class="property-field">
+            <label>Current Lender</label>
+            <div class="value">{{ property_data.foreclosure.currentLenderName or 'N/A' }}</div>
+        </div>
+        <div class="property-field">
+            <label>Document Type</label>
+            <div class="value">{{ property_data.foreclosure.documentType or 'N/A' }}</div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<details style="margin-top: 2rem;">
+    <summary style="cursor: pointer; color: var(--muted); font-size: 0.9rem;">
+        🔍 View Raw JSON Data
+    </summary>
+    <pre style="background: #0f1629; padding: 1rem; border-radius: 8px; overflow-x: auto; margin-top: 1rem; font-size: 0.85rem;">{{ property_payload | tojson(indent=2) if property_payload else 'No data' }}</pre>
+</details>
+
+<script>
+function toggleEditMode(sectionId) {
+    const section = document.getElementById(sectionId);
+    const isEditing = section.classList.contains('edit-mode');
+    
+    if (isEditing) {
+        section.classList.remove('edit-mode');
+        section.querySelector('button[type="submit"]').style.display = 'none';
+    } else {
+        section.classList.add('edit-mode');
+        section.querySelector('button[type="submit"]').style.display = 'block';
+    }
+}
+</script>
+
+{% else %}
+
+<div class="no-data">
+    <h3 style="margin: 0 0 1rem 0;">📭 No Property Data Available</h3>
+    <p style="color: var(--muted); margin-bottom: 1.5rem;">
+        Property data has not been fetched yet.
+    </p>
+    <a href="/cases/{{ case.id }}/property-lookup" class="btn">
+        🔍 Fetch Property Data ($0.10-0.25)
+    </a>
+</div>
+
+{% endif %}

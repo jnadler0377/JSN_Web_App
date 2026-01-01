@@ -1,69 +1,68 @@
-{# templates/cases/_case_skiptrace.html #}
-
 <section class="skip-trace-section">
   <h3>Skip Trace</h3>
+
   {% if skip_trace_error %}
-    <p class="error-text">{{ skip_trace_error }}</p>
-  {% endif %}
+    <p style="color:red; font-weight:bold;">{{ skip_trace_error }}</p>
+  {% elif skip_trace and skip_trace.results %}
+    {% for r in skip_trace.results %}
+      {% if r.persons %}
+        <ul class="skip-trace-list">
+          {% for p in r.persons %}
+            <li class="skip-trace-item">
+              {% if p.full_name %}
+                <div><strong>{{ p.full_name }}</strong></div>
+              {% endif %}
 
-  {% if skip_trace %}
-    {% set results = skip_trace.results if skip_trace.results is defined else [] %}
-    {% if results and results|length > 0 %}
-      {% set r = results[0] %}
-      {% set persons = r.persons if r.persons is defined else [] %}
-      {% set person = persons[0] if persons and persons|length > 0 else None %}
-      {% set addr = r.propertyAddress if r.propertyAddress is defined else {} %}
+              {% if p.phones %}
+                <div>
+                  <strong>Phones:</strong>
+                  <div>
+                    {% for ph in p.phones %}
+                      <div class="skip-phone-line">
+                        {{ ph.number }}
+                        {% if ph.type %} ({{ ph.type }}){% endif %}
+                        {% if ph.score is not none %} — Score: {{ ph.score }}{% endif %}
+                        {% if ph.last_reported %}
+                          — Last: {{ ph.last_reported[:10] }}
+                        {% endif %}
+                        {% if ph.tested is not none %}
+                          — Tested: {% if ph.tested %}✓{% else %}✗{% endif %}
+                        {% endif %}
+                        {% if ph.reachable is not none %}
+                          — Reachable: {% if ph.reachable %}✓{% else %}✗{% endif %}
+                        {% endif %}
+                        {% if ph.dnc is not none %}
+                          — DNC: {% if ph.dnc %}✓{% else %}✗{% endif %}
+                        {% endif %}
+                      </div>
+                    {% endfor %}
+                  </div>
+                </div>
+              {% endif %}
 
-      {% if person %}
-        <p><strong>Owner:</strong> {{ person.full_name or '—' }}</p>
-
-        <p><strong>Phones:</strong>
-          {% if person.phones %}
-            <ul class="skip-phones">
-              {% for ph in person.phones %}
-                <li>
-                  {{ macros.format_phone(ph.number) }}
-                  {% if ph.carrier %} ({{ ph.carrier }}){% endif %}
-                  {% if ph.score is not none %} – Score: {{ '%.0f'|format(ph.score) }}{% endif %}
-                  <br>
-                  Reachable: {{ macros.yn_icon(ph.reachable) }}
-                  &nbsp; Tested: {{ macros.yn_icon(ph.tested) }}
-                  &nbsp; DNC: {{ macros.yn_icon(ph.dnc) }}
-                </li>
-              {% endfor %}
-            </ul>
-          {% else %}
-            —
-          {% endif %}
-        </p>
-
-        <p><strong>Emails:</strong>
-          {% if person.emails %}
-            {% for em in person.emails %}
-              {{ em.email }}{% if not loop.last %}, {% endif %}
-            {% endfor %}
-          {% else %}
-            —
-          {% endif %}
-        </p>
-
-        <p><strong>Property Address (from skip trace):</strong>
-          {% if addr and (addr.street or addr.city or addr.state or addr.postalCode) %}
-            {{ addr.street }},
-            {{ addr.city }},
-            {{ addr.state }}
-            {{ addr.postalCode }}
-          {% else %}
-            —
-          {% endif %}
-        </p>
+              {% if p.emails %}
+                <div style="margin-top:0.25rem;">
+                  <strong>Emails:</strong>
+                  <div>
+                    {% for em in p.emails %}
+                      <div class="skip-email-line">
+                        {{ em.email }}
+                        {% if em.tested is not none %}
+                          — Tested: {% if em.tested %}✓{% else %}✗{% endif %}
+                        {% endif %}
+                      </div>
+                    {% endfor %}
+                  </div>
+                </div>
+              {% endif %}
+            </li>
+          {% endfor %}
+        </ul>
       {% else %}
-        <p>No skip trace person data.</p>
+        <p><em>No contact persons found.</em></p>
       {% endif %}
-    {% else %}
-      <p>No skip trace results.</p>
-    {% endif %}
+    {% endfor %}
   {% else %}
-    <p>No skip trace data. Use “Skip Trace Owner” to pull BatchData skip trace.</p>
+    <p><em>No skip trace results yet.</em></p>
   {% endif %}
 </section>

@@ -1,0 +1,528 @@
+<!-- app/static/style_mobile.css -->
+<style>
+/* ========================================
+   MOBILE RESPONSIVE ENHANCEMENTS
+   Add to existing style.css or include separately
+   ======================================== */
+
+/* === BASE MOBILE STYLES === */
+@media (max-width: 900px) {
+  
+  /* Container adjustments */
+  .container {
+    max-width: 100%;
+    padding: 0 12px;
+    margin: 12px auto;
+  }
+  
+  /* Header */
+  header h1 {
+    font-size: 18px;
+    margin-bottom: 8px;
+  }
+  
+  header nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 14px;
+  }
+  
+  header nav a {
+    margin-right: 0;
+    padding: 6px 10px;
+    background: var(--panel);
+    border-radius: 6px;
+  }
+  
+  /* === TABLES === */
+  
+  /* Horizontal scroll for tables */
+  .table-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin: 0 -12px;
+    padding: 0 12px;
+  }
+  
+  .table {
+    min-width: 600px; /* Force horizontal scroll */
+    font-size: 13px;
+  }
+  
+  .table th,
+  .table td {
+    padding: 8px 6px;
+    white-space: nowrap;
+  }
+  
+  /* Card-based table alternative for narrow screens */
+  @media (max-width: 640px) {
+    .table-responsive {
+      display: block;
+      border: none;
+    }
+    
+    .table-responsive thead {
+      display: none; /* Hide headers */
+    }
+    
+    .table-responsive tbody,
+    .table-responsive tr {
+      display: block;
+      width: 100%;
+    }
+    
+    .table-responsive tr {
+      background: var(--panel);
+      border-radius: 10px;
+      margin-bottom: 12px;
+      padding: 12px;
+      border: 1px solid #263043;
+    }
+    
+    .table-responsive td {
+      display: block;
+      text-align: left !important;
+      padding: 6px 0;
+      border: none;
+      background: transparent !important;
+    }
+    
+    .table-responsive td:before {
+      content: attr(data-label);
+      font-weight: 600;
+      display: inline-block;
+      width: 120px;
+      margin-right: 12px;
+      color: var(--muted);
+    }
+  }
+  
+  /* === FORMS === */
+  
+  .grid {
+    grid-template-columns: 1fr !important;
+    gap: 12px;
+  }
+  
+  .docs-grid {
+    grid-template-columns: 1fr 1fr !important;
+  }
+  
+  .form-grid {
+    grid-template-columns: 1fr !important;
+  }
+  
+  input[type="text"],
+  input[type="number"],
+  input[type="email"],
+  input[type="password"],
+  input[type="search"],
+  input[type="date"],
+  select,
+  textarea {
+    font-size: 16px; /* Prevent zoom on iOS */
+    width: 100%;
+  }
+  
+  .btn {
+    width: 100%;
+    padding: 12px 16px;
+    font-size: 16px;
+    margin-bottom: 8px;
+  }
+  
+  .btn-small {
+    width: auto;
+    padding: 6px 10px;
+    font-size: 13px;
+  }
+  
+  /* === CASE DETAIL PAGE === */
+  
+  .addr-photo-liens {
+    flex-direction: column;
+    gap: 16px;
+  }
+  
+  .addr-photo-liens .left-col,
+  .addr-photo-liens .right-col {
+    width: 100%;
+    min-width: 0;
+  }
+  
+  .streetview-container {
+    min-height: 200px;
+  }
+  
+  .streetview-img {
+    width: 100%;
+    height: auto;
+  }
+  
+  /* Numbers section full width on mobile */
+  .numbers-section {
+    margin-top: 0;
+  }
+  
+  /* Property cards stack vertically */
+  .prop-grid {
+    grid-template-columns: 1fr !important;
+  }
+  
+  /* === MODAL DIALOGS === */
+  
+  .modal-card,
+  .lien-modal-content {
+    width: 95vw !important;
+    max-width: 95vw !important;
+    padding: 16px;
+  }
+  
+  .lien-form-grid {
+    grid-template-columns: 1fr !important;
+  }
+  
+  /* === TABS === */
+  
+  .tabs {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    display: flex;
+    gap: 4px;
+    margin: 0 -12px;
+    padding: 0 12px;
+  }
+  
+  .tab-button {
+    white-space: nowrap;
+    font-size: 14px;
+    padding: 8px 12px;
+  }
+  
+  /* === STICKY ACTIONS === */
+  
+  .sticky-actions {
+    position: relative !important; /* Remove sticky on mobile */
+    flex-direction: column;
+    align-items: stretch;
+    padding: 12px;
+    gap: 8px;
+  }
+  
+  .sticky-actions .btn,
+  .sticky-actions button {
+    width: 100%;
+    margin: 0 !important;
+  }
+  
+  /* === PAGINATION === */
+  
+  .pagination {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px;
+    font-size: 13px;
+  }
+  
+  .pagination .btn {
+    width: auto;
+    padding: 6px 10px;
+    font-size: 13px;
+  }
+  
+  /* === FILTERS & SEARCH === */
+  
+  #bulk-actions > div {
+    flex-direction: column;
+    align-items: stretch !important;
+  }
+  
+  #bulk-actions input[type="search"] {
+    width: 100% !important;
+  }
+  
+  #bulk-actions label {
+    width: 100%;
+  }
+  
+  #bulk-actions select {
+    width: 100%;
+  }
+  
+  /* === DOCUMENTS & NOTES === */
+  
+  .docs-notes-row {
+    flex-direction: column;
+  }
+  
+  .doc-table {
+    display: block;
+    overflow-x: auto;
+  }
+  
+  .doc-table th,
+  .doc-table td {
+    padding: 8px;
+    font-size: 13px;
+  }
+  
+  /* === LIENS PANEL === */
+  
+  .lien-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  
+  .lien-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+  
+  /* === CONDITION OPTIONS === */
+  
+  .condition-group {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .condition-option {
+    padding: 10px;
+    background: var(--panel);
+    border-radius: 6px;
+    border: 1px solid #263043;
+  }
+  
+  /* === TOAST NOTIFICATIONS === */
+  
+  #toast {
+    right: 8px !important;
+    bottom: 8px !important;
+    left: 8px;
+    font-size: 14px;
+  }
+  
+  /* === PILLS === */
+  
+  .pill {
+    font-size: 10px;
+    padding: 2px 6px;
+  }
+  
+  /* === PROPERTY INLINE === */
+  
+  .property-inline {
+    font-size: 13px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  
+  .inline-edit-link {
+    display: inline-block;
+    margin-left: 0;
+    margin-top: 4px;
+  }
+}
+
+/* === EXTRA SMALL SCREENS (< 480px) === */
+@media (max-width: 480px) {
+  
+  .container {
+    padding: 0 8px;
+  }
+  
+  header h1 {
+    font-size: 16px;
+  }
+  
+  .table {
+    font-size: 12px;
+  }
+  
+  .btn {
+    font-size: 14px;
+    padding: 10px 12px;
+  }
+  
+  .docs-grid {
+    grid-template-columns: 1fr !important;
+  }
+  
+  /* Single column for all grids */
+  .prop-grid,
+  .grid,
+  .docs-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* === LANDSCAPE ORIENTATION === */
+@media (max-width: 900px) and (orientation: landscape) {
+  
+  .streetview-container {
+    max-height: 250px;
+  }
+  
+  .modal-card,
+  .lien-modal-content {
+    max-height: 80vh;
+    overflow-y: auto;
+  }
+}
+
+/* === PRINT STYLES === */
+@media print {
+  
+  .sticky-actions,
+  nav,
+  .btn,
+  button,
+  #bulk-actions,
+  .pagination,
+  .inline-edit-link {
+    display: none !important;
+  }
+  
+  .container {
+    max-width: 100%;
+  }
+  
+  .table {
+    font-size: 10px;
+  }
+  
+  .tab-content {
+    display: block !important;
+  }
+}
+
+/* === TOUCH IMPROVEMENTS === */
+
+/* Larger tap targets */
+@media (max-width: 900px) and (pointer: coarse) {
+  
+  a,
+  button,
+  .btn,
+  .tab-button,
+  input[type="checkbox"],
+  input[type="radio"] {
+    min-height: 44px; /* Apple's recommended minimum */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  
+  /* Disable hover effects on touch */
+  .btn:hover,
+  .tab-button:hover,
+  a:hover {
+    opacity: 1;
+  }
+  
+  /* Add active state for touch feedback */
+  .btn:active,
+  .tab-button:active,
+  a:active {
+    opacity: 0.7;
+    transform: scale(0.98);
+  }
+}
+
+/* === ACCESSIBILITY === */
+
+/* Focus indicators for keyboard navigation */
+@media (max-width: 900px) {
+  
+  *:focus-visible {
+    outline: 2px solid var(--acc);
+    outline-offset: 2px;
+  }
+  
+  button:focus-visible,
+  .btn:focus-visible {
+    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.3);
+  }
+}
+
+/* === LOADING STATES === */
+
+.loading-spinner {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: white;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 900px) {
+  .loading-spinner {
+    width: 16px;
+    height: 16px;
+    border-width: 2px;
+  }
+}
+</style>
+
+<!-- Add this to base.html to enable viewport meta tag -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+
+<!-- Add this JavaScript to detect mobile and add helper class -->
+<script>
+(function() {
+  // Add mobile class to body
+  if (window.innerWidth <= 900) {
+    document.body.classList.add('is-mobile');
+  }
+  
+  // Wrap tables in scrollable container
+  document.addEventListener('DOMContentLoaded', function() {
+    const tables = document.querySelectorAll('.table');
+    tables.forEach(function(table) {
+      if (!table.parentElement.classList.contains('table-wrapper')) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'table-wrapper';
+        table.parentNode.insertBefore(wrapper, table);
+        wrapper.appendChild(table);
+      }
+    });
+    
+    // Add data-label attributes for mobile card view
+    if (window.innerWidth <= 640) {
+      const tables = document.querySelectorAll('.table-responsive');
+      tables.forEach(function(table) {
+        const headers = Array.from(table.querySelectorAll('th')).map(th => th.textContent.trim());
+        const rows = table.querySelectorAll('tbody tr');
+        
+        rows.forEach(function(row) {
+          const cells = row.querySelectorAll('td');
+          cells.forEach(function(cell, index) {
+            if (headers[index]) {
+              cell.setAttribute('data-label', headers[index]);
+            }
+          });
+        });
+      });
+    }
+  });
+  
+  // Handle orientation changes
+  window.addEventListener('orientationchange', function() {
+    setTimeout(function() {
+      // Adjust layouts if needed
+      const vh = window.innerHeight * 0.01;
+      document.documentElement.style.setProperty('--vh', `${vh}px`);
+    }, 100);
+  });
+})();
+</script>

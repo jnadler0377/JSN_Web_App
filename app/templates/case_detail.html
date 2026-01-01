@@ -96,13 +96,15 @@
 </form>
 {% endif %}
 
-{% if not property_data %}
-    <form method="post" action="/cases/{{ case.id }}/property-lookup" class="js-disable-on-submit" style="display:inline;">
-      <button class="btn" type="submit" style="font-size:0.85em; padding:0.4em 0.7em; margin-left:0.5rem;">
-        Fetch Property Data
-      </button>
-    </form>
-    {% endif %}
+{% if not has_property_data %}
+       <a href="/cases/{{ case.id }}/property-lookup" class="btn">
+           🔍 Fetch Property Data
+       </a>
+   {% else %}
+       <span style="color: var(--muted);">
+           ✓ Property data fetched
+       </span>
+   {% endif %}
 </div>
 
 {% set pinellas_url = pinellas_appraiser_url(case.parcel_id) if case.parcel_id else None %}
@@ -125,16 +127,38 @@
 {% endif %}
 
 
+<!-- In case_detail.html, in the tabs section: -->
+<!-- Tabs -->
 <div class="tabs">
-  <button type="button" class="tab-button tab-active" data-tab="overview">Case Overview</button>
-  <button type="button" class="tab-button" data-tab="property">Property Data</button>
+    <button class="tab-button active" onclick="openTab(event, 'overview')">Overview</button>
+    <button class="tab-button" onclick="openTab(event, 'property')">Property</button>
+    <button class="tab-button" onclick="openTab(event, 'skiptrace')">Skip Trace</button>
+    <button class="tab-button" onclick="openTab(event, 'documents')">Documents</button>
 </div>
 
-{# ---------- NEW: include the two tab partials ---------- #}
+<!-- Tab Contents -->
+<div id="tab-overview" class="tab-content active">
+    {% include "cases/_case_overview_tab.html" %}
+</div>
 
-{% include "cases/_case_overview_tab.html" %}
+<div id="tab-property" class="tab-content">
+       {% include "cases/_case_property_tab.html" %}
+   </div>
 
-{% include "cases/_case_property_tab.html" %}
+<div id="tab-skiptrace" class="tab-content">
+    <h3>Skip Trace</h3>
+    {% if skip_trace and skip_trace.results %}
+        <!-- Skip trace content -->
+        {% include "cases/_case_skiptrace.html" %}
+    {% else %}
+        <p>No skip trace data. <a href="/cases/{{ case.id }}/skip-trace">Run Skip Trace</a></p>
+    {% endif %}
+</div>
+
+<div id="tab-documents" class="tab-content">
+    <h3>Documents</h3>
+    {% include "cases/_case_documents.html" %}
+</div>
 
 <script>
 function toggleParcelEdit(show) {
@@ -731,8 +755,12 @@ function togglePropertyEdit(show) {
   background:#0f0f0f;
   color:#eaeaea;
 }
-.tab-content.tab-active {
-  display:block;
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
 }
 
 /* Property tab cards */
@@ -819,7 +847,46 @@ function togglePropertyEdit(show) {
 
 </style>
 
+<script>
+function openTab(evt, tabName) {
+    // Hide all tab contents
+    var tabContents = document.querySelectorAll('.tab-content');
+    tabContents.forEach(function(content) {
+        content.classList.remove('active');
+        content.style.display = 'none';
+    });
+    
+    // Remove active class from all buttons
+    var tabButtons = document.querySelectorAll('.tab-button');
+    tabButtons.forEach(function(button) {
+        button.classList.remove('active');
+    });
+    
+    // Show the selected tab
+    var selectedTab = document.getElementById('tab-' + tabName);
+    if (selectedTab) {
+        selectedTab.style.display = 'block';
+        selectedTab.classList.add('active');
+    }
+    
+    // Mark button as active
+    if (evt && evt.currentTarget) {
+        evt.currentTarget.classList.add('active');
+    }
+}
 
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    // Show overview tab by default
+    openTab(null, 'overview');
+    
+    // Make first tab button active
+    var firstButton = document.querySelector('.tab-button');
+    if (firstButton) {
+        firstButton.classList.add('active');
+    }
+});
+</script>
 <script>
 (function () {
   function disableForm(form) {

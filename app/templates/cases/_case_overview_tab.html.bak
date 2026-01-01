@@ -1,5 +1,6 @@
 {# app/templates/cases/_case_overview_tab.html #}
-{# NO wrapper div - that's in case_detail.html already! #}
+
+<div id="tab-overview" class="tab-content tab-active">
 
 <!-- Two-column wrapper ONLY for address/photo (left) and Outstanding Liens (right) -->
 <div class="addr-photo-liens">
@@ -8,7 +9,7 @@
     <a href="#" onclick="toggleAddressEdit(true); return false;">edit</a>
     <div id="addressEdit" style="display:none; margin-top:0.5rem;">
       <form method="post" action="/cases/{{ case.id }}/update">
-        <input type="text" name="address_override" placeholder="Address" value="{{ (case.address_override or case.address)|title }}">
+        <input type="text" name="address_override" placeholder="...ss" value="{{ (case.address_override or case.address)|title }}">
         <button class="btn" type="submit">Save</button>
         <button class="btn" type="button" onclick="toggleAddressEdit(false)">Cancel</button>
       </form>
@@ -32,7 +33,7 @@
     {% set sv_addr = case.address_override or case.address %}
 
     <div class="streetview-container">
-      {% if sv_addr and streetview_url and streetview_url(sv_addr) %}
+      {% if sv_addr and streetview_url(sv_addr) %}
         <img
           src="{{ streetview_url(sv_addr) }}"
           alt="Street View"
@@ -64,8 +65,7 @@
       <h3>Value Calculation</h3>
       <form method="post" action="/cases/{{ case.id }}/update">
         <label>ARV</label>
-        <input type="number" step="0.01" name="arv" id="arv-input" value="{{ arv if arv else '' }}">
-        
+        <input type="number" step="0.01" name="arv" id="arv-input" value="{{ arv }}">
         <label>Condition</label>
         {% set rc = rehab_condition or 'Good' %}
         <div class="condition-group">
@@ -86,27 +86,19 @@
             <span>Excellent</span>
           </label>
         </div>
-        
         <label>Rehab</label>
         <input type="number" step="0.01" name="rehab" id="rehab-input"
                data-year-built="{{ rehab_year_built or '' }}"
                data-sqft="{{ rehab_sqft or '' }}"
                value="{{ rehab if rehab and rehab > 0 else '' }}"
-               placeholder="{% if rehab_suggested %}Suggested: ${{ '{:,.0f}'.format(rehab_suggested) }}{% endif %}">
-        
+               placeholder="{% if rehab_suggested %}Suggested Rehab {{ rehab_suggested | currency }}{% endif %}">
         <label>Closing Costs</label>
+        {% set closing_placeholder = (arv * 0.015) if arv else None %}
+        {% set closing_value = closing_input if closing_input is defined else closing %}
         <input type="number" step="0.01" name="closing_costs" id="closing-costs-input"
-               value="{{ closing_input if closing_input else '' }}"
-               placeholder="{% if arv %}Suggested: ${{ '{:,.0f}'.format(arv * 0.045) }}{% endif %}">
-        
-        <p><strong>JSN Offer:</strong> 
-          {% if wholesale_offer > 0 %}
-            ${{ '{:,.0f}'.format(wholesale_offer) }} - ${{ '{:,.0f}'.format(flip_offer) }}
-          {% else %}
-            Set ARV to calculate
-          {% endif %}
-        </p>
-        
+               value="{{ closing_value if closing_value and closing_value > 0 else '' }}"
+               placeholder="{% if closing_placeholder %}Suggested Closing Costs ${{ '%.2f'|format(closing_placeholder) }}{% endif %}">
+        <p><strong>JSN Offer:</strong> {{ wholesale_offer | currency }} - {{ flip_offer | currency }}</p>
         <button class="btn" type="submit">Save</button>
       </form>
     </section>
@@ -115,9 +107,9 @@
 
 <section class="defendants-section">
   <h3>Defendants</h3>
-  {% if defendants and defendants|length %}
+  {% if case.defendants and case.defendants|length %}
     <ul>
-      {% for d in defendants %}
+      {% for d in case.defendants %}
         {% set name = (d.name or '')|string %}
         {% if name and name|lower != 'nan' %}
           <li>{{ name }}</li>
@@ -136,6 +128,9 @@
     <p style="color:red; font-weight:bold;">{{ skip_trace_error }}</p>
   {% elif skip_trace and skip_trace.results %}
     {% for r in skip_trace.results %}
+      {# Keep propertyAddress available if needed, but don't show it #}
+      {% set pa = r.propertyAddress or {} %}
+
       {% if r.persons %}
         <ul class="skip-trace-list">
           {% for p in r.persons %}
@@ -150,20 +145,20 @@
                   <div>
                     {% for ph in p.phones %}
                       <div class="skip-phone-line">
-                        {{ ph.number }}
+                        {{ format_phone(ph.number) }}
                         {% if ph.type %} ({{ ph.type }}){% endif %}
-                        {% if ph.score is not none %} — Score: {{ ph.score }}{% endif %}
+                        {% if ph.score is not none %} – Score: {{ ph.score }}{% endif %}
                         {% if ph.last_reported %}
-                          — Last: {{ ph.last_reported[:10] }}
+                          – Last: {{ ph.last_reported[:10] }}
                         {% endif %}
                         {% if ph.tested is not none %}
-                          — Tested: {% if ph.tested %}✓{% else %}✗{% endif %}
+                          – Tested: {{ yn_icon(ph.tested) }}
                         {% endif %}
                         {% if ph.reachable is not none %}
-                          — Reachable: {% if ph.reachable %}✓{% else %}✗{% endif %}
+                          – Reachable: {{ yn_icon(ph.reachable) }}
                         {% endif %}
                         {% if ph.dnc is not none %}
-                          — DNC: {% if ph.dnc %}✓{% else %}✗{% endif %}
+                          – DNC: {{ yn_icon(ph.dnc) }}
                         {% endif %}
                       </div>
                     {% endfor %}
@@ -179,7 +174,7 @@
                       <div class="skip-email-line">
                         {{ em.email }}
                         {% if em.tested is not none %}
-                          — Tested: {% if em.tested %}✓{% else %}✗{% endif %}
+                          – Tested: {{ yn_icon(em.tested) }}
                         {% endif %}
                       </div>
                     {% endfor %}
@@ -198,6 +193,7 @@
   {% endif %}
 </section>
 
+
 <div class="docs-notes-row">
   <section class="documents-section">
     <h3>Documents</h3>
@@ -208,7 +204,7 @@
       {% if case.verified_complaint_path %}
         {% set has_docs = true %}
         <li>
-          Verified Complaint —
+          Verified Complaint –
           <a href="{{ url_for('uploads', path=case.verified_complaint_path) }}" target="_blank">
             View PDF
           </a>
@@ -218,7 +214,7 @@
       {% if case.mortgage_path %}
         {% set has_docs = true %}
         <li>
-          Mortgage —
+          Mortgage –
           <a href="{{ url_for('uploads', path=case.mortgage_path) }}" target="_blank">
             View PDF
           </a>
@@ -228,7 +224,7 @@
       {% if case.current_deed_path %}
         {% set has_docs = true %}
         <li>
-          Current Deed —
+          Current Deed –
           <a href="{{ url_for('uploads', path=case.current_deed_path) }}" target="_blank">
             View PDF
           </a>
@@ -238,7 +234,7 @@
       {% if case.previous_deed_path %}
         {% set has_docs = true %}
         <li>
-          Previous Deed —
+          Previous Deed –
           <a href="{{ url_for('uploads', path=case.previous_deed_path) }}" target="_blank">
             View PDF
           </a>
@@ -248,7 +244,7 @@
       {% if case.value_calc_path %}
         {% set has_docs = true %}
         <li>
-          Value Calculation —
+          Value Calculation –
           <a href="{{ url_for('uploads', path=case.value_calc_path) }}" target="_blank">
             View PDF
           </a>
@@ -333,3 +329,5 @@
 </div>
 
 {% include "cases/_case_overview_lien_modal.html" %}
+
+</div> {# end tab-overview #}

@@ -1,17 +1,34 @@
 <!doctype html>
 <html>
   <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>JSN Holdings Foreclosure Manager</title>
-    <link rel="stylesheet" href="/static/style.css">
-  </head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}JSN Holdings Foreclosure Manager{% endblock %}</title>
+    
+    <!-- Existing CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', path='/style.css') }}">
+    
+    <!-- ADD THIS LINE: -->
+    <link rel="stylesheet" href="{{ url_for('static', path='/style_mobile.css') }}">
+</head>
   <body>
     <header class="container">
       <h1>JSN Holdings Foreclosure Manager</h1>
       <nav>
-        <a href="/">Cases</a> | <a href="/import">Update Case List</a>
-      </nav>
+    <a href="/">Home</a>
+    <a href="/cases">Cases</a>
+    
+    <!-- ADD THESE NEW LINKS: -->
+    <a href="/dashboard">📊 Dashboard</a>
+    
+    <a href="/update-cases">Update Cases</a>
+    
+    <!-- If multi-user enabled: -->
+    {% if user %}
+        <a href="/profile">{{ user.email }}</a>
+        <a href="/logout">Logout</a>
+    {% endif %}
+</nav>
     </header>
 
     <main class="container">

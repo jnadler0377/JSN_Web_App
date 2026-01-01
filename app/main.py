@@ -1,5 +1,7 @@
 from __future__ import annotations
-
+from datetime import datetime
+from app.config import settings
+from app.services.auth_service import get_current_user
 # ---- Windows event loop fix for asyncio subprocess ----
 import sys as _sys
 import asyncio as _asyncio
@@ -49,7 +51,7 @@ from sqlalchemy.exc import OperationalError
 
 # ---------------- App imports ----------------
 from app.services.progress_bus import progress_bus
-from app.settings import settings
+#from app.settings import settings
 from .database import Base, engine, SessionLocal
 from .models import Case, Defendant, Docket, Note
 from .utils import ensure_case_folder, compute_offer_70, compute_offer_80
@@ -69,6 +71,203 @@ from app.services.report_service import generate_case_report, build_case_report_
 from app.services.update_cases_service import run_update_cases_job
 from app.services.update_cases_service import LAST_UPDATE_STATUS
 
+# ========================================
+# PROPERTY DATA PARSER
+# ========================================
+
+# Replace the parse_property_data function in main.py with this version:
+
+def parse_property_data(property_payload: dict) -> dict:
+    """Parse BatchData property payload into structured format"""
+    if not property_payload or not property_payload.get("results"):
+        return None
+    
+    results = property_payload["results"]
+    properties = results.get("properties", [])
+    
+    if not properties:
+        return None
+    
+    prop = properties[0]
+    
+    # Helper to safely get nested values
+    def safe_get(obj, *keys, default=None):
+        for key in keys:
+            if isinstance(obj, dict):
+                obj = obj.get(key)
+            else:
+                return default
+            if obj is None:
+                return default
+        return obj or default
+    
+    # === HANDLE MULTIPLE OWNERS ===
+    owner_data = prop.get("owner", {})
+    owners_list = []
+    
+    # Check if owner is an array
+    if isinstance(owner_data, list):
+        # Multiple owner objects
+        for owner in owner_data:
+            owners_list.append({
+                "fullName": owner.get("fullName") or owner.get("name") or "",
+                "mailingAddress": {
+                    "street": safe_get(owner, "mailingAddress", "street", default=""),
+                    "city": safe_get(owner, "mailingAddress", "city", default=""),
+                    "state": safe_get(owner, "mailingAddress", "state", default=""),
+                    "zipCode": (
+                        safe_get(owner, "mailingAddress", "zipCode") or
+                        safe_get(owner, "mailingAddress", "zip") or
+                        ""
+                    ),
+                    "county": safe_get(owner, "mailingAddress", "county", default=""),
+                }
+            })
+    elif isinstance(owner_data, dict):
+        # Single owner object
+        full_name = (
+            owner_data.get("fullName") or
+            owner_data.get("name") or
+            owner_data.get("ownerName") or
+            ""
+        )
+        
+        # Check if fullName contains multiple owners (semicolon-separated)
+        if ";" in full_name:
+            # Split into multiple owners with same address
+            for name in full_name.split(";"):
+                owners_list.append({
+                    "fullName": name.strip(),
+                    "mailingAddress": {
+                        "street": safe_get(owner_data, "mailingAddress", "street", default=""),
+                        "city": safe_get(owner_data, "mailingAddress", "city", default=""),
+                        "state": safe_get(owner_data, "mailingAddress", "state", default=""),
+                        "zipCode": (
+                            safe_get(owner_data, "mailingAddress", "zipCode") or
+                            safe_get(owner_data, "mailingAddress", "zip") or
+                            ""
+                        ),
+                        "county": safe_get(owner_data, "mailingAddress", "county", default=""),
+                    }
+                })
+        else:
+            # Single owner
+            owners_list.append({
+                "fullName": full_name,
+                "mailingAddress": {
+                    "street": safe_get(owner_data, "mailingAddress", "street", default=""),
+                    "city": safe_get(owner_data, "mailingAddress", "city", default=""),
+                    "state": safe_get(owner_data, "mailingAddress", "state", default=""),
+                    "zipCode": (
+                        safe_get(owner_data, "mailingAddress", "zipCode") or
+                        safe_get(owner_data, "mailingAddress", "zip") or
+                        ""
+                    ),
+                    "county": safe_get(owner_data, "mailingAddress", "county", default=""),
+                }
+            })
+    
+    # If no owners found, create empty placeholder
+    if not owners_list:
+        owners_list = [{
+            "fullName": "",
+            "mailingAddress": {
+                "street": "",
+                "city": "",
+                "state": "",
+                "zipCode": "",
+                "county": "",
+            }
+        }]
+    
+    parsed = {
+        "owners": owners_list,  # Array of owner objects
+        "owner": owners_list[0] if owners_list else {},  # Keep for backward compatibility
+        "quickList": prop.get("quickList", {}),
+        "valuation": {
+            "asOfDate": safe_get(prop, "valuation", "asOfDate", default=""),
+            "confidenceScore": safe_get(prop, "valuation", "confidenceScore"),
+            "equityPercent": safe_get(prop, "valuation", "equityPercent"),
+            "estimatedValue": safe_get(prop, "valuation", "estimatedValue"),
+            "ltv": safe_get(prop, "valuation", "ltv"),
+        },
+        "intel": {
+            "salePropensity": safe_get(prop, "intel", "salePropensity", default=""),
+        },
+        "demographics": {
+            "age": safe_get(prop, "demographics", "age"),
+            "childCount": safe_get(prop, "demographics", "childCount"),
+            "gender": safe_get(prop, "demographics", "gender", default=""),
+            "income": safe_get(prop, "demographics", "income"),
+            "individualOccupation": safe_get(prop, "demographics", "individualOccupation", default=""),
+            "maritalStatus": safe_get(prop, "demographics", "maritalStatus", default=""),
+            "netWorth": safe_get(prop, "demographics", "netWorth"),
+        },
+        "properties": {
+            "street": (
+                safe_get(prop, "address", "street") or
+                safe_get(prop, "address", "streetAddress") or
+                ""
+            ),
+            "city": safe_get(prop, "address", "city", default=""),
+            "state": safe_get(prop, "address", "state", default=""),
+            "zipCode": (
+                safe_get(prop, "address", "zipCode") or
+                safe_get(prop, "address", "zip") or
+                safe_get(prop, "address", "postalCode") or
+                ""
+            ),
+            "county": safe_get(prop, "address", "county", default=""),
+        },
+        "ids": {
+            "apn": (
+                safe_get(prop, "ids", "apn") or
+                safe_get(prop, "parcelId") or
+                safe_get(prop, "apn") or
+                ""
+            ),
+        },
+        "foreclosure": {
+            "caseNumber": safe_get(prop, "foreclosure", "caseNumber", default=""),
+            "currentLenderName": safe_get(prop, "foreclosure", "currentLenderName", default=""),
+            "documentType": safe_get(prop, "foreclosure", "documentType", default=""),
+            "filingDate": safe_get(prop, "foreclosure", "filingDate", default=""),
+        },
+        "mortgageHistory": prop.get("mortgageHistory", []),
+        "deedHistory": prop.get("deedHistory", []),
+    }
+    
+    return parsed
+
+# ========================================
+# NEW ROUTES - Add these to app/main.py
+# Features 7-11 implementation
+# ========================================
+
+from app.services.auth_service import (
+    get_current_user,
+    require_role,
+    login_user,
+    logout_user,
+    get_session_token,
+    create_user,
+)
+from app.services.analytics_service import (
+    get_dashboard_metrics,
+    get_cases_by_month,
+    get_conversion_funnel,
+    get_roi_analysis,
+    get_top_opportunities,
+)
+from app.services.comparables_service import (
+    fetch_and_save_comparables,
+    load_comparables_from_db,
+    calculate_suggested_arv,
+)
+from app.services.ocr_service import (
+    extract_document_data,
+    auto_populate_case_from_ocr,
+)
 
 # Resolve project root (adjust if your .env lives somewhere else)
 BASE_DIR = Path(__file__).resolve().parent.parent  # e.g. C:\pascowebapp
@@ -82,7 +281,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent  # e.g. C:\pascowebapp
 # ======================================================================
 app = FastAPI(title="JSN Holdings Foreclosure Manager")
 logger = logging.getLogger("pascowebapp")
-logger.setLevel(getattr(logging, settings.LOG_LEVEL, logging.INFO))
+logger.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "app" / "static"
@@ -104,6 +303,16 @@ def _currency(v):
     except Exception:
         return "$0.00"
 
+def format_phone(number):
+    """Format phone number as (XXX) XXX-XXXX"""
+    if not number:
+        return "N/A"
+    clean = str(number).replace('(', '').replace(')', '').replace('-', '').replace(' ', '')
+    if len(clean) == 10:
+        return f"({clean[:3]}) {clean[3:6]}-{clean[6:]}"
+    elif len(clean) == 11 and clean[0] == '1':
+        return f"({clean[1:4]}) {clean[4:7]}-{clean[7:]}"
+    return clean
 
 def streetview_url(address: str) -> str:
     """
@@ -343,6 +552,47 @@ def set_cached_skip_trace(case_id: int, payload: dict) -> None:
 
 Base.metadata.create_all(bind=engine)
 
+def format_date(date_str):
+    """
+    Format date string to MM/DD/YYYY
+    Handles various input formats
+    """
+    if not date_str or date_str in ['N/A', '', 'None']:
+        return 'N/A'
+    
+    # If already a string, try to parse it
+    date_str = str(date_str).strip()
+    
+    # Common date formats to try
+    formats_to_try = [
+        '%Y-%m-%d',           # 2024-01-15
+        '%Y-%m-%dT%H:%M:%S',  # 2024-01-15T10:30:00
+        '%Y-%m-%d %H:%M:%S',  # 2024-01-15 10:30:00
+        '%m/%d/%Y',           # 01/15/2024
+        '%m-%d-%Y',           # 01-15-2024
+        '%Y/%m/%d',           # 2024/01/15
+        '%d/%m/%Y',           # 15/01/2024
+        '%B %d, %Y',          # January 15, 2024
+        '%b %d, %Y',          # Jan 15, 2024
+    ]
+    
+    for fmt in formats_to_try:
+        try:
+            dt = datetime.strptime(date_str.split('.')[0].split('+')[0], fmt)
+            return dt.strftime('%m/%d/%Y')
+        except (ValueError, AttributeError):
+            continue
+    
+    # If no format worked, return original
+    return date_str
+
+
+# Register the filter with Jinja2
+# Find where templates is defined (should be near top of main.py)
+# Add this line RIGHT AFTER: templates = Jinja2Templates(directory="app/templates")
+
+templates.env.filters['format_date'] = format_date
+
 # ======================================================================
 # Startup: ensure late-added columns exist (sqlite ALTERs)
 # ======================================================================
@@ -400,6 +650,517 @@ def ensure_sqlite_columns():
         # first run or non-sqlite; ignore
         pass
 
+# ========================================
+# AUTHENTICATION ROUTES (Feature 9)
+# ========================================
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request):
+    """Login page"""
+    if not settings.enable_multi_user:
+        return RedirectResponse(url="/cases", status_code=303)
+    
+    return templates.TemplateResponse("auth/login.html", {"request": request})
+
+
+@app.post("/login")
+def login(
+    request: Request,
+    email: str = Form(...),
+    password: str = Form(...),
+):
+    """Process login"""
+    success, token, error = login_user(email, password)
+    
+    if not success:
+        return templates.TemplateResponse(
+            "auth/login.html",
+            {"request": request, "error": error},
+            status_code=400,
+        )
+    
+    # Set secure cookie
+    response = RedirectResponse(url="/cases", status_code=303)
+    response.set_cookie(
+        key="session_token",
+        value=token,
+        httponly=True,
+        secure=False,  # Set to True in production with HTTPS
+        samesite="lax",
+        max_age=settings.session_expire_minutes * 60,
+    )
+    
+    return response
+
+
+@app.get("/logout")
+async def logout(request: Request):
+    """Logout current user"""
+    from app.services.auth_service import get_session_token
+    from sqlalchemy import text
+    
+    token = get_session_token(request)
+    
+    if token:
+        # Delete session from database
+        with engine.begin() as conn:
+            conn.execute(
+                text("DELETE FROM sessions WHERE token = :token"),
+                {"token": token}
+            )
+    
+    # Redirect to login and clear cookie
+    response = RedirectResponse(url="/login", status_code=303)
+    response.delete_cookie("session_token")
+    return response
+
+
+@app.get("/profile", response_class=HTMLResponse)
+async def user_profile(request: Request):
+    """User profile page"""
+    from app.services.auth_service import get_session_token, validate_session
+    from sqlalchemy import text
+    
+    token = get_session_token(request)
+    if not token:
+        return RedirectResponse(url="/login", status_code=303)
+    
+    user_id = validate_session(token)
+    if not user_id:
+        return RedirectResponse(url="/login", status_code=303)
+    
+    # Get user from database
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("SELECT id, email, full_name, role FROM users WHERE id = :id"),
+            {"id": user_id}
+        ).fetchone()
+    
+    if not result:
+        return RedirectResponse(url="/login", status_code=303)
+    
+    user = {
+        "id": result[0],
+        "email": result[1],
+        "full_name": result[2],
+        "role": result[3]
+    }
+    
+    return templates.TemplateResponse(
+        "auth/profile.html",
+        {"request": request, "user": user}
+    )
+    
+    # If multi-user is enabled, try to get current user
+    try:
+        from app.services.auth_service import get_current_user
+        user = get_current_user(request)
+        
+        return templates.TemplateResponse(
+            "auth/profile.html",
+            {"request": request, "user": user}
+        )
+    except Exception as e:
+        # Not logged in or error
+        return RedirectResponse(url="/login", status_code=303)
+
+
+# ========================================
+# ANALYTICS DASHBOARD (Feature 10)
+# ========================================
+
+@app.get("/dashboard", response_class=HTMLResponse)
+def analytics_dashboard(
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
+    """Analytics dashboard page"""
+    if not settings.enable_analytics:
+        return RedirectResponse(url="/cases", status_code=303)
+    
+    metrics = get_dashboard_metrics()
+    monthly_data = get_cases_by_month(months=12)
+    funnel = get_conversion_funnel()
+    roi = get_roi_analysis()
+    opportunities = get_top_opportunities(limit=10)
+    
+    return templates.TemplateResponse(
+        "dashboard.html",
+        {
+            "request": request,
+            "user": user,
+            "metrics": metrics,
+            "monthly_data": monthly_data,
+            "funnel": funnel,
+            "roi": roi,
+            "opportunities": opportunities,
+        }
+    )
+
+
+@app.get("/api/dashboard/metrics")
+def api_dashboard_metrics(user: dict = Depends(get_current_user)):
+    """API endpoint for dashboard metrics (for AJAX refresh)"""
+    return get_dashboard_metrics()
+
+
+# ========================================
+# COMPARABLES ANALYSIS (Feature 7)
+# ========================================
+
+@app.post("/cases/{case_id}/fetch-comparables")
+async def fetch_comparables(
+    case_id: int,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Fetch comparable sales for a case"""
+    if not settings.enable_comparables:
+        raise HTTPException(status_code=400, detail="Comparables feature not enabled")
+    
+    # Load case
+    case = db.get(Case, case_id) if hasattr(db, "get") else db.query(Case).get(case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+    
+    # Get property data for address and details
+    from app.services.skiptrace_service import (
+        get_case_address_components,
+        load_property_for_case,
+    )
+    
+    street, city, state, postal = get_case_address_components(case)
+    property_payload = load_property_for_case(case_id)
+    
+    # Extract lat/lon and sqft if available
+    lat = lon = sqft = beds = baths = None
+    if property_payload:
+        props = (property_payload.get("results") or {}).get("properties") or []
+        if props:
+            prop = props[0]
+            addr = prop.get("address") or {}
+            building = prop.get("building") or {}
+            
+            lat = addr.get("latitude")
+            lon = addr.get("longitude")
+            sqft = building.get("livingAreaSqft")
+            beds = building.get("bedrooms")
+            baths = building.get("totalBathrooms")
+    
+    # Fetch comparables
+    try:
+        result = fetch_and_save_comparables(
+            case_id=case_id,
+            case_data={
+                "street": street,
+                "city": city,
+                "state": state,
+                "postal_code": postal,
+                "lat": lat,
+                "lon": lon,
+                "sqft": sqft,
+                "beds": beds,
+                "baths": baths,
+            }
+        )
+        
+        return {"success": True, "data": result}
+    
+    except Exception as exc:
+        logger.error(f"Failed to fetch comparables for case {case_id}: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/cases/{case_id}/comparables", response_class=HTMLResponse)
+def view_comparables(
+    request: Request,
+    case_id: int,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """View comparables page for a case"""
+    case = db.get(Case, case_id) if hasattr(db, "get") else db.query(Case).get(case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+    
+    comparables = load_comparables_from_db(case_id)
+    
+    # Calculate suggested ARV if comparables exist
+    suggested_arv = low_est = high_est = None
+    if comparables:
+        # Get subject property details
+        from app.services.skiptrace_service import load_property_for_case
+        property_payload = load_property_for_case(case_id)
+        
+        sqft = beds = baths = None
+        if property_payload:
+            props = (property_payload.get("results") or {}).get("properties") or []
+            if props:
+                building = props[0].get("building") or {}
+                sqft = building.get("livingAreaSqft")
+                beds = building.get("bedrooms")
+                baths = building.get("totalBathrooms")
+        
+        suggested_arv, low_est, high_est = calculate_suggested_arv(
+            comparables, sqft, beds, baths
+        )
+    
+    return templates.TemplateResponse(
+        "cases/comparables.html",
+        {
+            "request": request,
+            "user": user,
+            "case": case,
+            "comparables": comparables,
+            "suggested_arv": suggested_arv,
+            "low_estimate": low_est,
+            "high_estimate": high_est,
+        }
+    )
+
+
+# ========================================
+# DOCUMENT OCR (Feature 11)
+# ========================================
+
+@app.post("/cases/{case_id}/documents/{doc_type}/ocr")
+async def process_document_ocr_endpoint(
+    case_id: int,
+    doc_type: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Trigger OCR processing for a document"""
+    if not settings.enable_ocr:
+        raise HTTPException(status_code=400, detail="OCR feature not enabled")
+    
+    case = db.get(Case, case_id) if hasattr(db, "get") else db.query(Case).get(case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+    
+    # Get document path
+    doc_map = {
+        "verified": "verified_complaint_path",
+        "mortgage": "mortgage_path",
+        "current_deed": "current_deed_path",
+        "previous_deed": "previous_deed_path",
+    }
+    
+    attr_name = doc_map.get(doc_type)
+    if not attr_name:
+        raise HTTPException(status_code=400, detail="Invalid document type")
+    
+    doc_path = getattr(case, attr_name, None)
+    if not doc_path:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    full_path = UPLOAD_ROOT / doc_path
+    if not full_path.exists():
+        raise HTTPException(status_code=404, detail="Document file not found")
+    
+    # Check if Celery is available for background processing
+    if settings.is_celery_enabled:
+        from app.celery_app import process_document_ocr
+        task = process_document_ocr.delay(case_id, str(full_path), doc_type)
+        return {"success": True, "task_id": task.id, "status": "processing"}
+    else:
+        # Process synchronously
+        result = extract_document_data(str(full_path), doc_type)
+        populated = auto_populate_case_from_ocr(case_id, result)
+        
+        return {
+            "success": True,
+            "extracted_fields": len(result.get("structured_data", {})),
+            "auto_populated": populated,
+            "data": result["structured_data"],
+        }
+
+
+# ========================================
+# BULK OPERATIONS
+# ========================================
+
+@app.post("/cases/bulk/skip-trace")
+async def bulk_skip_trace_endpoint(
+    background_tasks: BackgroundTasks,
+    ids: List[int] = Form(default=[]),
+    user: dict = Depends(get_current_user),
+):
+    """Bulk skip trace multiple cases"""
+    if not ids:
+        return RedirectResponse(url="/cases", status_code=303)
+    
+    # Check if Celery is available
+    if settings.is_celery_enabled:
+        from app.celery_app import bulk_skip_trace
+        task = bulk_skip_trace.delay(ids)
+        return RedirectResponse(
+            url=f"/tasks/{task.id}",
+            status_code=303
+        )
+    else:
+        # Fallback: process in background task (limited)
+        job_id = uuid.uuid4().hex
+        
+        async def run_bulk_skip():
+            from app.services.skiptrace_service import (
+                get_case_address_components,
+                batchdata_skip_trace,
+                save_skiptrace_row,
+            )
+            db = SessionLocal()
+            try:
+                for case_id in ids:
+                    try:
+                        case = db.get(Case, case_id) if hasattr(db, "get") else db.query(Case).get(case_id)
+                        if not case:
+                            continue
+                        
+                        street, city, state, postal = get_case_address_components(case)
+                        skip_data = batchdata_skip_trace(street, city, state, postal)
+                        save_skiptrace_row(case.id, skip_data)
+                        
+                    except Exception as exc:
+                        logger.error(f"Bulk skip trace failed for case {case_id}: {exc}")
+            finally:
+                db.close()
+        
+        background_tasks.add_task(run_bulk_skip)
+        return RedirectResponse(url="/cases", status_code=303)
+
+
+@app.post("/cases/bulk/property-lookup")
+async def bulk_property_lookup_endpoint(
+    background_tasks: BackgroundTasks,
+    ids: List[int] = Form(default=[]),
+    user: dict = Depends(get_current_user),
+):
+    """Bulk property lookup for multiple cases"""
+    if not ids:
+        return RedirectResponse(url="/cases", status_code=303)
+    
+    if settings.is_celery_enabled:
+        from app.celery_app import bulk_property_lookup
+        task = bulk_property_lookup.delay(ids)
+        return RedirectResponse(url=f"/tasks/{task.id}", status_code=303)
+    else:
+        # Process in background
+        job_id = uuid.uuid4().hex
+        
+        async def run_bulk_lookup():
+            from app.services.skiptrace_service import (
+                get_case_address_components,
+                batchdata_property_lookup_all_attributes,
+                save_property_for_case,
+            )
+            db = SessionLocal()
+            try:
+                for case_id in ids:
+                    try:
+                        case = db.get(Case, case_id) if hasattr(db, "get") else db.query(Case).get(case_id)
+                        if not case:
+                            continue
+                        
+                        street, city, state, postal = get_case_address_components(case)
+                        prop_data = batchdata_property_lookup_all_attributes(street, city, state, postal)
+                        save_property_for_case(case.id, prop_data)
+                        
+                    except Exception as exc:
+                        logger.error(f"Bulk property lookup failed for case {case_id}: {exc}")
+            finally:
+                db.close()
+        
+        background_tasks.add_task(run_bulk_lookup)
+        return RedirectResponse(url="/cases", status_code=303)
+
+
+# ========================================
+# TASK STATUS (for Celery)
+# ========================================
+
+@app.get("/tasks/{task_id}", response_class=HTMLResponse)
+def task_status(request: Request, task_id: str):
+    """Check status of a background task"""
+    if not settings.is_celery_enabled:
+        return templates.TemplateResponse(
+            "task_status.html",
+            {"request": request, "error": "Background tasks not enabled"}
+        )
+    
+    from app.celery_app import celery_app
+    from celery.result import AsyncResult
+    
+    task = AsyncResult(task_id, app=celery_app)
+    
+    return templates.TemplateResponse(
+        "task_status.html",
+        {
+            "request": request,
+            "task_id": task_id,
+            "status": task.state,
+            "result": task.result if task.ready() else None,
+        }
+    )
+
+
+# ========================================
+# ADMIN ROUTES (Feature 9)
+# ========================================
+
+@app.get("/admin/users", response_class=HTMLResponse)
+def admin_users_list(
+    request: Request,
+    user: dict = Depends(require_role(["admin"])),
+):
+    """Admin: List all users"""
+    with engine.connect() as conn:
+        users = conn.execute(
+            text("""
+                SELECT id, email, full_name, role, is_active, created_at, last_login
+                FROM users
+                ORDER BY created_at DESC
+            """)
+        ).mappings().fetchall()
+    
+    return templates.TemplateResponse(
+        "admin/users.html",
+        {"request": request, "user": user, "users": [dict(u) for u in users]}
+    )
+
+
+@app.post("/admin/users/create")
+def admin_create_user(
+    request: Request,
+    email: str = Form(...),
+    password: str = Form(...),
+    full_name: str = Form(...),
+    role: str = Form(...),
+    user: dict = Depends(require_role(["admin"])),
+):
+    """Admin: Create new user"""
+    try:
+        user_id = create_user(email, password, full_name, role)
+        return RedirectResponse(url="/admin/users", status_code=303)
+    except ValueError as exc:
+        return templates.TemplateResponse(
+            "admin/users.html",
+            {"request": request, "error": str(exc)},
+            status_code=400,
+        )
+
+
+# ========================================
+# STARTUP EVENT
+# ========================================
+
+@app.on_event("startup")
+def startup_event():
+    """Initialize multi-user system on startup"""
+    from app.services.auth_service import create_default_admin
+    
+    if settings.enable_multi_user:
+        create_default_admin()
 
 # --------------------------------------------------------
 #  SKIP TRACE NORMALIZED TABLE (CREATE ON STARTUP)
@@ -805,62 +1566,160 @@ def update_case_fields(
 
 @app.get("/cases/{case_id}", response_class=HTMLResponse)
 def case_detail(request: Request, case_id: int, db: Session = Depends(get_db)):
+    """Case detail page with all tabs"""
+    
+    # Get case
     getter = getattr(db, "get", None)
     if callable(getter):
         case = db.get(Case, case_id)
     else:
-        case = db.query(Case).get(case_id)  # type: ignore[call-arg]
+        case = db.query(Case).get(case_id)
 
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
 
+    # Get notes
     notes = (
         db.query(Note)
         .filter(Note.case_id == case_id)
         .order_by(Note.id.desc())
         .all()
     )
+    
     try:
         setattr(case, "notes", notes)
     except Exception:
         pass
 
-    # Skip trace from normalized table (if present)
-    skip_trace = load_skiptrace_for_case(case_id)
+    # Load skip trace data
+    skip_trace = None
     skip_trace_error = None
+    try:
+        from app.services.skiptrace_service import load_skiptrace_for_case
+        skip_trace = load_skiptrace_for_case(case_id)
+    except Exception as e:
+        logger.error(f"Error loading skip trace for case {case_id}: {e}")
+        skip_trace_error = str(e)
 
-    # Property lookup (if present)
-    property_data = load_property_for_case(case_id)
-    property_error = None
+    # Load property data
+    property_payload = None
+    property_data = None
+    has_property_data = False
+    
+    try:
+        from app.services.skiptrace_service import load_property_for_case
+        property_payload = load_property_for_case(case_id)
+        
+        if property_payload:
+            has_property_data = True
+            property_data = parse_property_data(property_payload)
+            
+    except Exception as e:
+        logger.error(f"Error loading property for case {case_id}: {e}")
 
-    offer = compute_offer_70(case.arv or 0, case.rehab or 0, case.closing_costs or 0)
-    flip_offer = compute_offer_80(case.arv or 0, case.rehab or 0, case.closing_costs or 0)
-    rehab_condition = getattr(case, "rehab_condition", "") or "Good"
-    property_overrides = _parse_property_overrides(case)
-    rehab_suggested = _estimate_rehab_from_property(
-        property_data, rehab_condition, property_overrides
-    )
+    # === Financial Calculations ===
+    arv = float(case.arv) if case.arv else 0.0
+    rehab = float(case.rehab) if case.rehab else 0.0
+    rehab_condition = case.rehab_condition or "Good"
+    
+    rehab_year_built = None
+    rehab_sqft = None
+    rehab_suggested = None
+    
+    if property_payload and property_payload.get("results"):
+        props = property_payload["results"].get("properties", [])
+        if props:
+            p = props[0]
+            building = p.get("building", {})
+            rehab_year_built = building.get("yearBuilt")
+            rehab_sqft = building.get("livingAreaSqft")
+            
+            if rehab_sqft and rehab_year_built:
+                import datetime
+                current_year = datetime.datetime.now().year
+                age = current_year - rehab_year_built
+                
+                condition_multipliers = {
+                    "Poor": 50,
+                    "Fair": 30,
+                    "Good": 15,
+                    "Excellent": 5,
+                }
+                base_cost = condition_multipliers.get(rehab_condition, 15)
+                
+                if age > 50:
+                    base_cost *= 1.5
+                elif age > 30:
+                    base_cost *= 1.2
+                
+                rehab_suggested = rehab_sqft * base_cost
+
+    closing_input = float(case.closing_costs) if case.closing_costs else None
+    if closing_input:
+        closing = closing_input
+    else:
+        closing = arv * 0.045 if arv > 0 else 0.0
+
+    wholesale_offer = 0.0
+    flip_offer = 0.0
+    
+    if arv > 0:
+        wholesale_offer = (arv * 0.65) - rehab - closing
+        
+        if arv < 350000:
+            flip_multiplier = 0.80
+        else:
+            flip_multiplier = 0.85
+        
+        flip_offer = (arv * flip_multiplier) - rehab - closing
+
+    import json
+    liens_list = []
+    try:
+        if case.outstanding_liens:
+            liens_data = json.loads(case.outstanding_liens)
+            if isinstance(liens_data, list):
+                liens_list = liens_data
+    except Exception as e:
+        logger.error(f"Error parsing liens for case {case_id}: {e}")
+
+    defendants = []
+    try:
+        defendants = (
+            db.query(Defendant)
+            .filter(Defendant.case_id == case_id)
+            .all()
+        )
+    except Exception as e:
+        logger.error(f"Error loading defendants for case {case_id}: {e}")
 
     return templates.TemplateResponse(
         "case_detail.html",
         {
             "request": request,
             "case": case,
-            "offer_70": offer,
-            "offer_80": flip_offer,
-            "active_parcel_id": case.parcel_id,
             "notes": notes,
+            "defendants": defendants,
             "skip_trace": skip_trace,
             "skip_trace_error": skip_trace_error,
+            "property_payload": property_payload,
             "property_data": property_data,
-            "property_error": property_error,
+            "has_property_data": has_property_data,
+            "liens_list": liens_list,
+            "arv": arv,
+            "rehab": rehab,
             "rehab_condition": rehab_condition,
+            "rehab_year_built": rehab_year_built,
+            "rehab_sqft": rehab_sqft,
             "rehab_suggested": rehab_suggested,
-            "property_overrides": property_overrides,
+            "closing": closing,
+            "closing_input": closing_input,
+            "wholesale_offer": wholesale_offer,
+            "flip_offer": flip_offer,
+            "format_phone": lambda x: format_phone(x) if x else "N/A",
+            "yn_icon": lambda x: "✓" if x else "✗",
         },
     )
-
-
 
 # NEW: Skip trace endpoint using BatchData
 @app.post("/cases/{case_id}/skip-trace", response_class=HTMLResponse)
@@ -2353,8 +3212,215 @@ def unarchive_cases_async(
     )
     db.commit()
     return {"ok": True, "updated": len(ids)}
+@app.post("/cases/{case_id}/property/update-owner")
+async def update_property_owner(
+    request: Request,
+    case_id: int,
+):
+    """Update owner information - multiple names, shared address"""
+    try:
+        from app.services.skiptrace_service import load_property_for_case
+        import json
+        
+        # Get form data
+        form_data = await request.form()
+        owner_count = int(form_data.get("owner_count", 1))
+        
+        property_payload = load_property_for_case(case_id)
+        
+        if property_payload and property_payload.get("results"):
+            if "properties" in property_payload["results"] and len(property_payload["results"]["properties"]) > 0:
+                prop = property_payload["results"]["properties"][0]
+                
+                # Shared mailing address (same for all owners)
+                shared_address = {
+                    "street": form_data.get("mailing_street", ""),
+                    "city": form_data.get("mailing_city", ""),
+                    "state": form_data.get("mailing_state", ""),
+                    "zipCode": form_data.get("mailing_zip", ""),
+                    "county": form_data.get("mailing_county", ""),
+                }
+                
+                if owner_count > 1:
+                    # Multiple owners - create array with shared address
+                    owners_array = []
+                    
+                    for i in range(1, owner_count + 1):
+                        owner_name = form_data.get(f"owner_name_{i}", "")
+                        if owner_name:  # Only add if name is not empty
+                            owners_array.append({
+                                "fullName": owner_name,
+                                "name": owner_name,
+                                "mailingAddress": shared_address.copy()
+                            })
+                    
+                    # Store as array
+                    prop["owner"] = owners_array
+                    
+                else:
+                    # Single owner
+                    owner_name = form_data.get("owner_name_1", "")
+                    
+                    prop["owner"] = {
+                        "fullName": owner_name,
+                        "name": owner_name,
+                        "mailingAddress": shared_address
+                    }
+                
+                # Save back to database
+                with engine.begin() as conn:
+                    conn.execute(
+                        text("""
+                            UPDATE case_property 
+                            SET raw_json = :json
+                            WHERE case_id = :case_id
+                        """),
+                        {"case_id": case_id, "json": json.dumps(property_payload)}
+                    )
+                
+                logger.info(f"Updated {owner_count} owner(s) for case {case_id}")
+    
+    except Exception as exc:
+        logger.error(f"Failed to update owner info: {exc}")
+    
+    return RedirectResponse(url=f"/cases/{case_id}", status_code=303)
+
+@app.post("/cases/{case_id}/property/update-valuation")
+async def update_property_valuation(
+    request: Request,
+    case_id: int,
+    estimated_value: Optional[float] = Form(None),
+    as_of_date: str = Form(""),
+    confidence_score: Optional[float] = Form(None),
+    equity_percent: Optional[float] = Form(None),
+    ltv: Optional[float] = Form(None),
+):
+    """Update valuation information"""
+    try:
+        from app.services.skiptrace_service import load_property_for_case
+        import json
+        
+        property_payload = load_property_for_case(case_id)
+        
+        if property_payload and property_payload.get("results"):
+            if "properties" in property_payload["results"] and len(property_payload["results"]["properties"]) > 0:
+                prop = property_payload["results"]["properties"][0]
+                
+                if "valuation" not in prop:
+                    prop["valuation"] = {}
+                
+                prop["valuation"].update({
+                    "estimatedValue": estimated_value,
+                    "asOfDate": as_of_date,
+                    "confidenceScore": confidence_score,
+                    "equityPercent": equity_percent,
+                    "ltv": ltv,
+                })
+                
+                with engine.begin() as conn:
+                    conn.execute(
+                        text("""
+                            UPDATE case_property 
+                            SET raw_json = :json
+                            WHERE case_id = :case_id
+                        """),
+                        {"case_id": case_id, "json": json.dumps(property_payload)}
+                    )
+                
+                logger.info(f"Updated valuation for case {case_id}")
+    
+    except Exception as exc:
+        logger.error(f"Failed to update valuation: {exc}")
+    
+    return RedirectResponse(url=f"/cases/{case_id}", status_code=303)
 
 
+@app.post("/cases/{case_id}/property/update-demographics")
+async def update_property_demographics(
+    request: Request,
+    case_id: int,
+    age: Optional[int] = Form(None),
+    gender: str = Form(""),
+    marital_status: str = Form(""),
+    child_count: Optional[int] = Form(None),
+    income: Optional[float] = Form(None),
+    net_worth: Optional[float] = Form(None),
+    occupation: str = Form(""),
+):
+    """Update demographics information"""
+    try:
+        from app.services.skiptrace_service import load_property_for_case
+        import json
+        
+        property_payload = load_property_for_case(case_id)
+        
+        if property_payload and property_payload.get("results"):
+            if "properties" in property_payload["results"] and len(property_payload["results"]["properties"]) > 0:
+                prop = property_payload["results"]["properties"][0]
+                
+                if "demographics" not in prop:
+                    prop["demographics"] = {}
+                
+                prop["demographics"].update({
+                    "age": age,
+                    "gender": gender,
+                    "maritalStatus": marital_status,
+                    "childCount": child_count,
+                    "income": income,
+                    "netWorth": net_worth,
+                    "individualOccupation": occupation,
+                })
+                
+                with engine.begin() as conn:
+                    conn.execute(
+                        text("""
+                            UPDATE case_property 
+                            SET raw_json = :json
+                            WHERE case_id = :case_id
+                        """),
+                        {"case_id": case_id, "json": json.dumps(property_payload)}
+                    )
+                
+                logger.info(f"Updated demographics for case {case_id}")
+    
+    except Exception as exc:
+        logger.error(f"Failed to update demographics: {exc}")
+    
+    return RedirectResponse(url=f"/cases/{case_id}", status_code=303)
+@app.get("/debug/owners/{case_id}")
+def debug_owners(case_id: int):
+    """Debug owner data structure"""
+    from app.services.skiptrace_service import load_property_for_case
+    import json
+    
+    property_payload = load_property_for_case(case_id)
+    
+    if not property_payload or not property_payload.get("results"):
+        return {"error": "No property data"}
+    
+    props = property_payload["results"].get("properties", [])
+    if not props:
+        return {"error": "No properties in results"}
+    
+    prop = props[0]
+    
+    # Get raw owner data
+    owner_raw = prop.get("owner")
+    
+    # Parse it
+    parsed = parse_property_data(property_payload)
+    
+    return {
+        "step1_raw_owner_type": str(type(owner_raw).__name__),
+        "step2_raw_owner_data": owner_raw,
+        "step3_is_list": isinstance(owner_raw, list),
+        "step4_is_dict": isinstance(owner_raw, dict),
+        "step5_if_dict_fullName": owner_raw.get("fullName") if isinstance(owner_raw, dict) else None,
+        "step6_if_dict_has_semicolon": ";" in str(owner_raw.get("fullName", "")) if isinstance(owner_raw, dict) else False,
+        "step7_parsed_owners_count": len(parsed.get("owners", [])) if parsed else 0,
+        "step8_parsed_owners": parsed.get("owners") if parsed else None,
+        "step9_full_parsed_data": parsed,
+    }
 # =====================
 # Manual Add Case (v1.08)
 # =====================

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div style="max-width: 800px; margin: 2rem auto;">
+    <div style="background: var(--panel); border-radius: 10px; padding: 2rem; border: 1px solid #263043;">
+        <h2 style="margin-top: 0;">User Profile</h2>
+        
+        <div style="display: grid; gap: 1rem; margin: 2rem 0;">
+            <div>
+                <label style="color: var(--muted); font-size: 0.9rem;">Email</label>
+                <div style="font-size: 1.1rem; margin-top: 0.25rem;">{{ user.email }}</div>
+            </div>
+            
+            <div>
+                <label style="color: var(--muted); font-size: 0.9rem;">Full Name</label>
+                <div style="font-size: 1.1rem; margin-top: 0.25rem;">{{ user.full_name or 'Not set' }}</div>
+            </div>
+            
+            <div>
+                <label style="color: var(--muted); font-size: 0.9rem;">Role</label>
+                <div style="font-size: 1.1rem; margin-top: 0.25rem;">
+                    <span style="background: var(--acc); padding: 0.25rem 0.75rem; border-radius: 6px;">
+                        {{ user.role | title }}
+                    </span>
+                </div>
+            </div>
+        </div>
+        
+        <div style="margin-top: 2rem; padding-top: 2rem; border-top: 1px solid #263043; display: flex; gap: 1rem;">
+            <a href="/cases" class="btn">← Back to Cases</a>
+            <a href="/logout" class="btn" style="background: #ef4444;">Logout</a>
+        </div>
+    </div>
+</div>
+
+{% endblock %}

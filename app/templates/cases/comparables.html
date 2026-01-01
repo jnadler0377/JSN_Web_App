@@ -1,0 +1,284 @@
+<!-- app/templates/cases/comparables.html -->
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+.comp-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.comp-summary {
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 1.5rem;
+  border: 1px solid #263043;
+  margin-bottom: 1.5rem;
+}
+
+.comp-summary h3 {
+  margin: 0 0 1rem 0;
+  color: var(--text);
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.summary-item {
+  padding: 1rem;
+  background: var(--bg);
+  border-radius: 8px;
+  border: 1px solid #263043;
+}
+
+.summary-label {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-bottom: 0.25rem;
+}
+
+.summary-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.summary-value.highlight {
+  color: var(--acc);
+}
+
+.comparables-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.comparables-table th,
+.comparables-table td {
+  padding: 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid #263043;
+}
+
+.comparables-table th {
+  background: #0f1629;
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.comparables-table tbody tr:hover {
+  background: #0f1629;
+}
+
+.distance-badge {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  background: #1e293b;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.no-comparables {
+  text-align: center;
+  padding: 3rem;
+  color: var(--muted);
+}
+
+.no-comparables button {
+  margin-top: 1rem;
+}
+
+.map-container {
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 1rem;
+  border: 1px solid #263043;
+  margin-bottom: 1.5rem;
+}
+
+.loading-spinner {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: white;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+</style>
+
+<div class="comp-header">
+  <div>
+    <h2>Comparable Sales</h2>
+    <p style="color: var(--muted); margin: 0.5rem 0 0 0;">
+      Case: <strong>{{ case.case_number }}</strong>
+    </p>
+  </div>
+  <div>
+    <form method="POST" action="/cases/{{ case.id }}/fetch-comparables" style="display: inline;">
+      <button type="submit" class="btn">
+        🔄 Refresh Comparables
+      </button>
+    </form>
+    <a href="/cases/{{ case.id }}" class="btn" style="margin-left: 0.5rem;">← Back to Case</a>
+  </div>
+</div>
+
+<!-- Suggested ARV Summary -->
+{% if suggested_arv and suggested_arv > 0 %}
+<div class="comp-summary">
+  <h3>Suggested Valuation</h3>
+  <div class="summary-grid">
+    <div class="summary-item">
+      <div class="summary-label">Suggested ARV</div>
+      <div class="summary-value highlight">${{ "{:,.0f}".format(suggested_arv) }}</div>
+    </div>
+    <div class="summary-item">
+      <div class="summary-label">Low Estimate</div>
+      <div class="summary-value">${{ "{:,.0f}".format(low_estimate) }}</div>
+    </div>
+    <div class="summary-item">
+      <div class="summary-label">High Estimate</div>
+      <div class="summary-value">${{ "{:,.0f}".format(high_estimate) }}</div>
+    </div>
+    <div class="summary-item">
+      <div class="summary-label">Current ARV</div>
+      <div class="summary-value">
+        {% if case.arv %}
+          ${{ "{:,.0f}".format(case.arv) }}
+        {% else %}
+          <span style="color: var(--muted);">Not set</span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- Map View (if Google Maps API available) -->
+{% if case.lat and case.lon %}
+<div class="map-container">
+  <h3 style="margin: 0 0 1rem 0;">Location Map</h3>
+  <div id="comps-map" style="width: 100%; height: 400px; border-radius: 8px; background: #0f1629;">
+    <iframe
+      width="100%"
+      height="400"
+      frameborder="0"
+      style="border:0; border-radius: 8px;"
+      referrerpolicy="no-referrer-when-downgrade"
+      src="https://www.google.com/maps/embed/v1/place?key=YOUR_GOOGLE_MAPS_API_KEY&q={{ case.address or case.address_override }}"
+      allowfullscreen>
+    </iframe>
+  </div>
+</div>
+{% endif %}
+
+<!-- Comparables Table -->
+{% if comparables %}
+<div style="background: var(--panel); border-radius: 10px; padding: 1.5rem; border: 1px solid #263043;">
+  <h3 style="margin: 0 0 1rem 0;">Recent Sales ({{ comparables|length }} found)</h3>
+  
+  <div style="overflow-x: auto;">
+    <table class="comparables-table">
+      <thead>
+        <tr>
+          <th>Address</th>
+          <th>Sale Date</th>
+          <th>Sale Price</th>
+          <th>$/sqft</th>
+          <th>Beds</th>
+          <th>Baths</th>
+          <th>Sqft</th>
+          <th>Year Built</th>
+          <th>Distance</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for comp in comparables %}
+        <tr>
+          <td>
+            <strong>{{ comp.comp_address }}</strong><br>
+            <span style="color: var(--muted); font-size: 0.85rem;">
+              {{ comp.comp_city }}, {{ comp.comp_state }} {{ comp.comp_zip }}
+            </span>
+          </td>
+          <td>{{ comp.sale_date or 'N/A' }}</td>
+          <td>
+            {% if comp.sale_price %}
+              <strong>${{ "{:,.0f}".format(comp.sale_price) }}</strong>
+            {% else %}
+              <span style="color: var(--muted);">N/A</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if comp.price_per_sqft %}
+              ${{ "{:,.0f}".format(comp.price_per_sqft) }}
+            {% else %}
+              <span style="color: var(--muted);">N/A</span>
+            {% endif %}
+          </td>
+          <td>{{ comp.bedrooms or '-' }}</td>
+          <td>{{ comp.bathrooms or '-' }}</td>
+          <td>{{ "{:,}".format(comp.sqft) if comp.sqft else '-' }}</td>
+          <td>{{ comp.year_built or '-' }}</td>
+          <td>
+            {% if comp.distance_miles %}
+              <span class="distance-badge">{{ "%.2f"|format(comp.distance_miles) }} mi</span>
+            {% else %}
+              <span style="color: var(--muted);">N/A</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% else %}
+
+<!-- No Comparables Found -->
+<div class="no-comparables">
+  <p style="font-size: 1.1rem; margin-bottom: 0.5rem;">📭 No comparables found</p>
+  <p style="color: var(--muted);">
+    Click "Refresh Comparables" above to fetch recent sales near this property.
+  </p>
+  <form method="POST" action="/cases/{{ case.id }}/fetch-comparables">
+    <button type="submit" class="btn">
+      <span class="loading-spinner" style="display: none;"></span>
+      🔍 Fetch Comparables
+    </button>
+  </form>
+</div>
+
+<script>
+// Show loading spinner on submit
+document.querySelector('form button').addEventListener('click', function(e) {
+  const spinner = this.querySelector('.loading-spinner');
+  if (spinner) {
+    spinner.style.display = 'inline-block';
+    this.disabled = true;
+  }
+});
+</script>
+
+{% endif %}
+
+{% endblock %}

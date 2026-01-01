@@ -1,0 +1,301 @@
+<!-- app/templates/dashboard.html -->
+{% extends "base.html" %}
+{% block content %}
+
+<style>
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.metric-card {
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 1.25rem;
+  border: 1px solid #263043;
+}
+
+.metric-card h3 {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.metric-value {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0.5rem 0;
+}
+
+.metric-change {
+  font-size: 0.85rem;
+  color: #6ee7b7;
+}
+
+.metric-change.negative {
+  color: #fca5a5;
+}
+
+.chart-container {
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 1.5rem;
+  border: 1px solid #263043;
+  margin-bottom: 1.5rem;
+}
+
+.opportunities-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.opportunities-table th,
+.opportunities-table td {
+  padding: 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid #263043;
+}
+
+.opportunities-table th {
+  background: #0f1629;
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+}
+
+.opportunities-table tr:hover {
+  background: #0f1629;
+  cursor: pointer;
+}
+
+.funnel-container {
+  display: flex;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.funnel-stage {
+  flex: 1;
+  background: var(--panel);
+  border-radius: 8px;
+  padding: 1rem;
+  text-align: center;
+  position: relative;
+}
+
+.funnel-stage::after {
+  content: '→';
+  position: absolute;
+  right: -1.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 1.5rem;
+  color: var(--muted);
+}
+
+.funnel-stage:last-child::after {
+  display: none;
+}
+
+.funnel-count {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.funnel-label {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-top: 0.25rem;
+}
+
+.funnel-rate {
+  font-size: 0.75rem;
+  color: #6ee7b7;
+  margin-top: 0.5rem;
+}
+</style>
+
+<h2>Analytics Dashboard</h2>
+
+<!-- Key Metrics -->
+<div class="dashboard-grid">
+  <div class="metric-card">
+    <h3>Total Cases</h3>
+    <div class="metric-value">{{ metrics.total_cases | default(0) }}</div>
+    <div class="metric-change">{{ metrics.new_cases_30d | default(0) }} new this month</div>
+  </div>
+
+  <div class="metric-card">
+    <h3>Active Pipeline</h3>
+    <div class="metric-value">{{ metrics.active_cases | default(0) }}</div>
+    <div class="metric-change">{{ metrics.high_value_count | default(0) }} high-value</div>
+  </div>
+
+  <div class="metric-card">
+    <h3>Avg ARV</h3>
+    <div class="metric-value">${{ "{:,.0f}".format(metrics.avg_arv | default(0)) }}</div>
+    <div class="metric-change">{{ metrics.avg_rehab | default(0) | round(0) | int }} avg rehab</div>
+  </div>
+
+  <div class="metric-card">
+    <h3>Potential Profit</h3>
+    <div class="metric-value">${{ "{:,.0f}".format(metrics.total_potential_profit | default(0)) }}</div>
+    <div class="metric-change">Total pipeline value</div>
+  </div>
+
+  <div class="metric-card">
+    <h3>Short Sales</h3>
+    <div class="metric-value">{{ metrics.short_sale_count | default(0) }}</div>
+    <div class="metric-change">Liens exceed offer</div>
+  </div>
+
+  <div class="metric-card">
+    <h3>Owner Occupied</h3>
+    <div class="metric-value">{{ metrics.owner_occupied_count | default(0) }}</div>
+    <div class="metric-change">{{ metrics.high_equity_count | default(0) }} high equity</div>
+  </div>
+</div>
+
+<!-- Conversion Funnel -->
+{% if funnel %}
+<div class="chart-container">
+  <h3>Deal Pipeline</h3>
+  <div class="funnel-container">
+    <div class="funnel-stage">
+      <div class="funnel-count">{{ funnel.total_leads }}</div>
+      <div class="funnel-label">Total Leads</div>
+    </div>
+    <div class="funnel-stage">
+      <div class="funnel-count">{{ funnel.contacted }}</div>
+      <div class="funnel-label">Contacted</div>
+      <div class="funnel-rate">{{ funnel.contact_rate | default(0) }}%</div>
+    </div>
+    <div class="funnel-stage">
+      <div class="funnel-count">{{ funnel.offer_sent }}</div>
+      <div class="funnel-label">Offers Sent</div>
+      <div class="funnel-rate">{{ funnel.offer_rate | default(0) }}%</div>
+    </div>
+    <div class="funnel-stage">
+      <div class="funnel-count">{{ funnel.offer_accepted }}</div>
+      <div class="funnel-label">Accepted</div>
+    </div>
+    <div class="funnel-stage">
+      <div class="funnel-count">{{ funnel.closed_won }}</div>
+      <div class="funnel-label">Closed Won</div>
+      <div class="funnel-rate">{{ funnel.close_rate | default(0) }}%</div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- ROI Analysis -->
+{% if roi and roi.total_deals > 0 %}
+<div class="chart-container">
+  <h3>ROI Performance</h3>
+  <div class="dashboard-grid" style="margin-top: 1rem;">
+    <div>
+      <strong>Total Deals:</strong> {{ roi.total_deals }}
+    </div>
+    <div>
+      <strong>Avg Purchase:</strong> ${{ "{:,.0f}".format(roi.avg_purchase_price) }}
+    </div>
+    <div>
+      <strong>Avg ARV:</strong> ${{ "{:,.0f}".format(roi.avg_arv) }}
+    </div>
+    <div>
+      <strong>Avg Profit:</strong> ${{ "{:,.0f}".format(roi.avg_profit) }}
+    </div>
+    <div>
+      <strong>Avg ROI:</strong> {{ roi.avg_roi_pct }}%
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- Cases by Month (Simple Bar Chart) -->
+{% if monthly_data %}
+<div class="chart-container">
+  <h3>Cases by Month</h3>
+  <canvas id="monthlyChart" width="400" height="150"></canvas>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+<script>
+const monthlyData = {{ monthly_data | tojson | safe }};
+
+const ctx = document.getElementById('monthlyChart').getContext('2d');
+new Chart(ctx, {
+  type: 'bar',
+  data: {
+    labels: monthlyData.map(d => d.month).reverse(),
+    datasets: [{
+      label: 'Case Count',
+      data: monthlyData.map(d => d.count).reverse(),
+      backgroundColor: '#8b5cf6',
+      borderColor: '#7c3aed',
+      borderWidth: 1
+    }]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    scales: {
+      y: {
+        beginAtZero: true,
+        ticks: { color: '#a7b0c0' },
+        grid: { color: '#263043' }
+      },
+      x: {
+        ticks: { color: '#a7b0c0' },
+        grid: { color: '#263043' }
+      }
+    },
+    plugins: {
+      legend: {
+        labels: { color: '#a7b0c0' }
+      }
+    }
+  }
+});
+</script>
+{% endif %}
+
+<!-- Top Opportunities -->
+{% if opportunities %}
+<div class="chart-container">
+  <h3>Top Opportunities</h3>
+  <table class="opportunities-table">
+    <thead>
+      <tr>
+        <th>Case #</th>
+        <th>Address</th>
+        <th>ARV</th>
+        <th>Potential Profit</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for opp in opportunities %}
+      <tr onclick="window.location.href='/cases/{{ opp.id }}'">
+        <td>{{ opp.case_number }}</td>
+        <td>{{ opp.address[:40] }}{% if opp.address|length > 40 %}...{% endif %}</td>
+        <td>${{ "{:,.0f}".format(opp.arv) }}</td>
+        <td><strong>${{ "{:,.0f}".format(opp.potential_profit) }}</strong></td>
+        <td>{{ opp.status | title }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% endblock %}

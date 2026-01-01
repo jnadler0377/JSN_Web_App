@@ -1,0 +1,31 @@
+<!-- In case_detail.html, find the "Fetch Property Data" button and wrap it like this: -->
+
+<!-- BEFORE: -->
+<!-- <a href="/cases/{{ case.id }}/property-lookup" class="btn">Fetch Property Data</a> -->
+
+<!-- AFTER: -->
+{% if not has_property_data %}
+    <a href="/cases/{{ case.id }}/property-lookup" class="btn" style="background: #3b82f6;">
+        🔍 Fetch Property Data
+    </a>
+{% else %}
+    <span style="color: var(--muted); font-size: 0.9rem;">
+        ✓ Property data already fetched
+    </span>
+{% endif %}
+
+<!-- 
+If the button is in the sticky actions section, it should look like this:
+-->
+
+<div class="sticky-actions">
+    <!-- Other buttons... -->
+    
+    {% if not has_property_data %}
+        <a href="/cases/{{ case.id }}/property-lookup" class="btn" style="background: #3b82f6;">
+            Fetch Property Data
+        </a>
+    {% endif %}
+    
+    <!-- Rest of buttons... -->
+</div>
