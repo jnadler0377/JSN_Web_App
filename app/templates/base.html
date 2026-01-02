@@ -13,23 +13,21 @@
 </head>
   <body>
     <header class="container">
-      <h1>JSN Holdings Foreclosure Manager</h1>
-      <nav>
-    <a href="/">Home</a>
-    <a href="/cases">Cases</a>
-    
-    <!-- ADD THESE NEW LINKS: -->
-    <a href="/dashboard">📊 Dashboard</a>
-    
-    <a href="/update-cases">Update Cases</a>
-    
-    <!-- If multi-user enabled: -->
-    {% if user %}
-        <a href="/profile">{{ user.email }}</a>
-        <a href="/logout">Logout</a>
+  <div style="display: flex; justify-content: space-between; align-items: center;">
+    <h1>JSN Holdings Foreclosure Manager</h1>
+    {% if request.cookies.get('session_token') %}
+    <div style="font-size: 0.9em; color: #a7b0c0;">
+      Logged in | 
+      <a href="/profile">Profile</a> | 
+      <a href="/users">Users</a> | 
+      <a href="/logout">Logout</a>
+    </div>
     {% endif %}
-</nav>
-    </header>
+  </div>
+  <nav>
+    <a href="/">Cases</a> | <a href="/import">Update Case List</a> | <a href="/dashboard">Dashboard</a>
+  </nav>
+</header>
 
     <main class="container">
       {% block content %}{% endblock %}

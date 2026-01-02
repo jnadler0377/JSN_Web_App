@@ -458,9 +458,9 @@ function toggleEditMode(sectionId) {
     <p style="color: var(--muted); margin-bottom: 1.5rem;">
         Property data has not been fetched yet.
     </p>
-    <a href="/cases/{{ case.id }}/property-lookup" class="btn">
-        🔍 Fetch Property Data ($0.10-0.25)
-    </a>
+    <form method="post" action="/cases/{{ case.id }}/property-lookup" style="display:inline;">
+        <button type="submit" class="btn">🔍 Fetch Property Data ($.80)</button>
+    </form>
 </div>
 
 {% endif %}

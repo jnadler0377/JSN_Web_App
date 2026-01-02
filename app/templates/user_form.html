@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h2>{% if user %}Edit User{% else %}Create New User{% endif %}</h2>
+
+{% if error %}
+<div class="error" style="background: #fee; color: #c33; padding: 12px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #c33;">
+    {{ error }}
+</div>
+{% endif %}
+
+<form method="post" action="/users/create" style="max-width: 600px;">
+    <div class="form-group" style="margin-bottom: 20px;">
+        <label>Username *</label>
+        <input type="text" name="username" value="{{ user.username if user else '' }}" required>
+    </div>
+    
+    <div class="form-group" style="margin-bottom: 20px;">
+        <label>Email *</label>
+        <input type="email" name="email" value="{{ user.email if user else '' }}" required>
+    </div>
+    
+    <div class="form-group" style="margin-bottom: 20px;">
+        <label>Full Name</label>
+        <input type="text" name="full_name" value="{{ user.full_name if user else '' }}">
+    </div>
+    
+    <div class="form-group" style="margin-bottom: 20px;">
+        <label>Password *</label>
+        <input type="password" name="password" required minlength="8" 
+               placeholder="Minimum 8 characters">
+        <small style="color: #666; font-size: 0.85em;">Must be at least 8 characters</small>
+    </div>
+    
+    <div class="form-group" style="margin-bottom: 20px;">
+        <label style="display: flex; align-items: center; cursor: pointer;">
+            <input type="checkbox" name="is_admin" value="true" 
+                   {% if user and user.is_admin %}checked{% endif %}
+                   style="width: auto; margin-right: 8px;">
+            <span>Administrator (can manage users and all data)</span>
+        </label>
+    </div>
+    
+    <div style="display: flex; gap: 10px;">
+        <button type="submit" class="btn">Create User</button>
+        <a href="/users" class="btn" style="background: #999; text-decoration: none; display: inline-block; text-align: center;">Cancel</a>
+    </div>
+</form>
+
+<style>
+.form-group label {
+    display: block;
+    margin-bottom: 6px;
+    font-weight: 500;
+}
+.form-group input[type="text"],
+.form-group input[type="email"],
+.form-group input[type="password"] {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    font-size: 15px;
+}
+</style>
+
+{% endblock %}

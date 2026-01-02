@@ -38,12 +38,12 @@
 {% set closing = case.closing_costs or 0 %}
 {% set closing_input = case.closing_costs if case.closing_costs and case.closing_costs > 0 else None %}
 {% set ov = property_overrides or {} %}
-{% set props = property_data['results']['properties'] if property_data and property_data.get('results') and property_data['results'].get('properties') else [] %}
+{% set props = property_payload['results']['properties'] if property_payload and property_payload.get('results') and property_payload['results'].get('properties') else [] %}
 {% set p = props[0] if props else {} %}
 {% set listing = p.get('listing') or {} %}
 {% set general = p.get('general') or {} %}
 {% set building = p.get('building') or {} %}
-{% set prop_year = listing.get('yearBuilt') or general.get('yearBuilt') or p.get('yearBuilt') %}
+{% set prop_year = listing.get('yearBuilt') or building.get('yearBuilt') or general.get('yearBuilt') or p.get('yearBuilt') %}
 {% set prop_sqft = listing.get('totalBuildingAreaSquareFeet') or building.get('livingAreaSqft') or general.get('buildingAreaSqft') %}
 {% set rehab_year_built = ov.get('year_built') or prop_year %}
 {% set rehab_sqft = ov.get('sqft') or prop_sqft %}
@@ -97,9 +97,9 @@
 {% endif %}
 
 {% if not has_property_data %}
-       <a href="/cases/{{ case.id }}/property-lookup" class="btn">
-           🔍 Fetch Property Data
-       </a>
+       <form method="post" action="/cases/{{ case.id }}/property-lookup" style="display:inline;">
+         <button type="submit" class="btn">🔍 Fetch Property Data</button>
+       </form>
    {% else %}
        <span style="color: var(--muted);">
            ✓ Property data fetched
@@ -151,7 +151,10 @@
         <!-- Skip trace content -->
         {% include "cases/_case_skiptrace.html" %}
     {% else %}
-        <p>No skip trace data. <a href="/cases/{{ case.id }}/skip-trace">Run Skip Trace</a></p>
+        <p>No skip trace data.</p>
+        <form method="post" action="/cases/{{ case.id }}/skip-trace" class="js-disable-on-submit" style="display:inline;">
+          <button class="btn" type="submit">Run Skip Trace</button>
+        </form>
     {% endif %}
 </div>
 

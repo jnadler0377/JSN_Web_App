@@ -2,6 +2,7 @@ from __future__ import annotations
 from datetime import datetime
 from app.config import settings
 from app.services.auth_service import get_current_user
+from app.auth_routes import router as auth_router, get_current_user, require_auth
 # ---- Windows event loop fix for asyncio subprocess ----
 import sys as _sys
 import asyncio as _asyncio
@@ -43,6 +44,8 @@ from fastapi import (
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastapi import Request
+from fastapi.responses import RedirectResponse
 
 # ---------------- DB / ORM ----------------
 from sqlalchemy.orm import Session
@@ -67,10 +70,9 @@ from app.services.skiptrace_service import (
     normalize_property_payload,
 )
 
-from app.services.report_service import generate_case_report, build_case_report_bytes
+from app.services.report_service import generate_case_report, build_case_report_bytes, _is_short_sale, _report_filename
 from app.services.update_cases_service import run_update_cases_job
 from app.services.update_cases_service import LAST_UPDATE_STATUS
-
 # ========================================
 # PROPERTY DATA PARSER
 # ========================================
@@ -280,6 +282,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent  # e.g. C:\pascowebapp
 # App bootstrap
 # ======================================================================
 app = FastAPI(title="JSN Holdings Foreclosure Manager")
+# Include authentication routes
+app.include_router(auth_router)
+
+# Rest of your app setup continues...
 logger = logging.getLogger("pascowebapp")
 logger.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
 
@@ -586,7 +592,26 @@ def format_date(date_str):
     # If no format worked, return original
     return date_str
 
-
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """Redirect to login if not authenticated"""
+    # Allow these paths without authentication
+    public_paths = ["/login", "/static"]
+    
+    # Check if path is public
+    is_public = any(request.url.path.startswith(path) for path in public_paths)
+    
+    if not is_public:
+        if settings.enable_multi_user:
+            session_token = request.cookies.get("session_token")
+            if not session_token:
+                return RedirectResponse(url="/login")
+            from app.services.auth_service import validate_session
+            if not validate_session(session_token):
+                return RedirectResponse(url="/login")
+    
+    response = await call_next(request)
+    return response
 # Register the filter with Jinja2
 # Find where templates is defined (should be near top of main.py)
 # Add this line RIGHT AFTER: templates = Jinja2Templates(directory="app/templates")
@@ -1232,6 +1257,40 @@ def ensure_skiptrace_tables():
         pass
     except Exception as exc:
         logger.warning("Failed to ensure skip-trace tables: %s", exc)
+
+# --------------------------------------------------------
+#  SESSION TABLE (CREATE ON STARTUP)
+# --------------------------------------------------------
+@app.on_event("startup")
+def ensure_sessions_table():
+    """
+    Ensure the sessions table exists for token-based auth.
+    """
+    try:
+        with engine.begin() as conn:
+            conn.exec_driver_sql(
+                """
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    token TEXT UNIQUE NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+                )
+                """
+            )
+            conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token)"
+            )
+            conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)"
+            )
+            conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)"
+            )
+    except Exception as exc:
+        logger.warning("Failed to ensure sessions table: %s", exc)
 # --------------------------------------------------------
 #  PROPERTY LOOKUP TABLE (CREATE ON STARTUP)
 # --------------------------------------------------------
@@ -1631,8 +1690,19 @@ def case_detail(request: Request, case_id: int, db: Session = Depends(get_db)):
         if props:
             p = props[0]
             building = p.get("building", {})
-            rehab_year_built = building.get("yearBuilt")
-            rehab_sqft = building.get("livingAreaSqft")
+            listing = p.get("listing", {})
+            general = p.get("general", {})
+            rehab_year_built = (
+                listing.get("yearBuilt")
+                or building.get("yearBuilt")
+                or general.get("yearBuilt")
+                or p.get("yearBuilt")
+            )
+            rehab_sqft = (
+                listing.get("totalBuildingAreaSquareFeet")
+                or building.get("livingAreaSqft")
+                or general.get("buildingAreaSqft")
+            )
             
             if rehab_sqft and rehab_year_built:
                 import datetime
@@ -1772,6 +1842,20 @@ def skip_trace_case(request: Request, case_id: int, db: Session = Depends(get_db
     )
     flip_offer = compute_offer_80(case.arv or 0, case.rehab or 0, case.closing_costs or 0)
 
+    property_payload = load_property_for_case(case_id)
+    property_data = parse_property_data(property_payload) if property_payload else None
+    has_property_data = bool(property_payload and property_payload.get("results"))
+
+    defendants = []
+    try:
+        defendants = (
+            db.query(Defendant)
+            .filter(Defendant.case_id == case_id)
+            .all()
+        )
+    except Exception as e:
+        logger.error(f"Error loading defendants for case {case_id}: {e}")
+
     return templates.TemplateResponse(
         "case_detail.html",
         {
@@ -1781,15 +1865,23 @@ def skip_trace_case(request: Request, case_id: int, db: Session = Depends(get_db
             "offer_80": flip_offer,
             "active_parcel_id": case.parcel_id,
             "notes": notes,
+            "defendants": defendants,
             "skip_trace": skip_trace,
             "skip_trace_error": skip_trace_error,
-            "property_data": load_property_for_case(case_id),
+            "property_payload": property_payload,
+            "property_data": property_data,
             "property_error": None,
+            "has_property_data": has_property_data,
             "rehab_condition": rehab_condition,
             "rehab_suggested": rehab_suggested,
             "property_overrides": property_overrides,
         },
     )
+
+@app.get("/cases/{case_id}/property-lookup", response_class=HTMLResponse)
+def property_lookup_case_get(request: Request, case_id: int, db: Session = Depends(get_db)):
+    return property_lookup_case(request, case_id, db)
+
 
 @app.post("/cases/{case_id}/property-lookup", response_class=HTMLResponse)
 def property_lookup_case(request: Request, case_id: int, db: Session = Depends(get_db)):
@@ -1820,6 +1912,7 @@ def property_lookup_case(request: Request, case_id: int, db: Session = Depends(g
     skip_trace_error: Optional[str] = None
 
     # Property lookup
+    property_payload: Optional[dict] = None
     property_data: Optional[dict] = None
     property_error: Optional[str] = None
 
@@ -1829,15 +1922,20 @@ def property_lookup_case(request: Request, case_id: int, db: Session = Depends(g
             street, city, state, postal_code
         )
         save_property_for_case(case.id, raw_property_data)
-        property_data = normalize_property_payload(raw_property_data)
+        property_payload = normalize_property_payload(raw_property_data)
+        property_data = parse_property_data(property_payload)
     except HTTPException as exc:
         detail = exc.detail
         property_error = detail if isinstance(detail, str) else str(detail)
         # fall back to any previously saved data
-        property_data = load_property_for_case(case_id)
+        property_payload = load_property_for_case(case_id)
+        if property_payload:
+            property_data = parse_property_data(property_payload)
     except Exception as exc:
         property_error = f"Unexpected error during property lookup: {exc}"
-        property_data = load_property_for_case(case_id)
+        property_payload = load_property_for_case(case_id)
+        if property_payload:
+            property_data = parse_property_data(property_payload)
 
     offer = compute_offer_70(case.arv or 0, case.rehab or 0, case.closing_costs or 0)
     rehab_condition = getattr(case, "rehab_condition", "") or "Good"
@@ -1846,6 +1944,50 @@ def property_lookup_case(request: Request, case_id: int, db: Session = Depends(g
         property_data, rehab_condition, property_overrides
     )
     flip_offer = compute_offer_80(case.arv or 0, case.rehab or 0, case.closing_costs or 0)
+
+    arv = float(case.arv) if case.arv else 0.0
+    rehab = float(case.rehab) if case.rehab else 0.0
+    closing_input = float(case.closing_costs) if case.closing_costs else None
+    if closing_input:
+        closing = closing_input
+    else:
+        closing = arv * 0.045 if arv > 0 else 0.0
+
+    rehab_year_built = None
+    rehab_sqft = None
+    if property_payload and property_payload.get("results"):
+        props = property_payload["results"].get("properties", [])
+        if props:
+            p = props[0]
+            listing = p.get("listing", {})
+            building = p.get("building", {})
+            general = p.get("general", {})
+            rehab_year_built = (
+                listing.get("yearBuilt")
+                or building.get("yearBuilt")
+                or general.get("yearBuilt")
+                or p.get("yearBuilt")
+            )
+            rehab_sqft = (
+                listing.get("totalBuildingAreaSquareFeet")
+                or building.get("livingAreaSqft")
+                or general.get("buildingAreaSqft")
+            )
+
+    if property_overrides.get("year_built"):
+        rehab_year_built = property_overrides.get("year_built")
+    if property_overrides.get("sqft"):
+        rehab_sqft = property_overrides.get("sqft")
+
+    defendants = []
+    try:
+        defendants = (
+            db.query(Defendant)
+            .filter(Defendant.case_id == case_id)
+            .all()
+        )
+    except Exception as e:
+        logger.error(f"Error loading defendants for case {case_id}: {e}")
 
     return templates.TemplateResponse(
         "case_detail.html",
@@ -1856,12 +1998,21 @@ def property_lookup_case(request: Request, case_id: int, db: Session = Depends(g
             "offer_80": flip_offer,
             "active_parcel_id": case.parcel_id,
             "notes": notes,
+            "defendants": defendants,
             "skip_trace": skip_trace,
             "skip_trace_error": skip_trace_error,
+            "property_payload": property_payload,
             "property_data": property_data,
             "property_error": property_error,
+            "has_property_data": bool(property_payload and property_payload.get("results")),
+            "arv": arv,
+            "rehab": rehab,
             "rehab_condition": rehab_condition,
+            "rehab_year_built": rehab_year_built,
+            "rehab_sqft": rehab_sqft,
             "rehab_suggested": rehab_suggested,
+            "closing": closing,
+            "closing_input": closing_input,
             "property_overrides": property_overrides,
         },
     )
@@ -2073,8 +2224,11 @@ def download_case_reports(
             case = case_map.get(cid)
             if not case:
                 continue
-            case_num = _safe_name(getattr(case, "case_number", "") or "")
-            file_name = f"case_{cid}.pdf" if not case_num else f"case_{cid}_{case_num}.pdf"
+            file_name = _report_filename(
+                cid,
+                _safe_name(getattr(case, "case_number", "") or ""),
+                _is_short_sale(case),
+            )
             report_buf = build_case_report_bytes(cid, db, include_attachments=include_docs)
             report_buf.seek(0)
             zf.writestr(file_name, report_buf.read())
@@ -2558,27 +2712,54 @@ def cases_list(
                     props = (payload.get("results") or {}).get("properties") or []
                     if not props:
                         continue
-                    quick = props[0].get("quickLists") or {}
+                    quick = (
+                        props[0].get("quickLists")
+                        or props[0].get("quickList")
+                        or {}
+                    )
                 except Exception:
                     continue
 
                 tags: list[str] = []
-                if quick.get("ownerOccupied"):
-                    tags.append("Owner Occupied")
-                if quick.get("highEquity"):
-                    tags.append("High Equity")
-                if quick.get("freeAndClear"):
-                    tags.append("Free & Clear")
-                if quick.get("absenteeOwner"):
-                    tags.append("Absentee Owner")
-                if quick.get("preforeclosure"):
-                    tags.append("Pre-foreclosure")
-                if quick.get("taxDefault"):
-                    tags.append("Tax Default")
-                if quick.get("vacant"):
-                    tags.append("Vacant")
-                if quick.get("hasHoa"):
-                    tags.append("Has HOA")
+                if isinstance(quick, dict):
+                    for key, value in quick.items():
+                        if not value:
+                            continue
+                        label = (
+                            str(key)
+                            .replace("_", " ")
+                            .replace("  ", " ")
+                            .strip()
+                        )
+                        if not label:
+                            continue
+                        # Title-case without mangling acronyms like HOA
+                        parts = []
+                        for part in label.split(" "):
+                            if part.lower() == "hoa":
+                                parts.append("HOA")
+                            else:
+                                parts.append(part[:1].upper() + part[1:])
+                        tags.append(" ".join(parts))
+                elif isinstance(quick, list):
+                    for item in quick:
+                        if isinstance(item, str):
+                            label = item.strip()
+                        elif isinstance(item, dict):
+                            label = (
+                                item.get("name")
+                                or item.get("tag")
+                                or item.get("label")
+                                or ""
+                            ).strip()
+                        else:
+                            label = ""
+                        if label:
+                            tags.append(label)
+                elif isinstance(quick, str):
+                    label = quick.strip()
+                    if label:
+                        tags.append(label)
                 if tags:
                     quick_flags[int(cid)] = tags
         except Exception as e:

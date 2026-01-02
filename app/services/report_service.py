@@ -6,6 +6,7 @@ import datetime as _dt
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+import re
 
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
@@ -53,6 +54,54 @@ def _fmt_money(raw: Any) -> str:
 def _parse_float(raw: Any, default: float = 0.0) -> float:
     if raw is None:
         return default
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    try:
+        s = str(raw).strip()
+        if not s:
+            return default
+        cleaned = s.replace("$", "").replace(",", "")
+        return float(cleaned)
+    except Exception:
+        return default
+
+
+def _safe_filename_piece(raw: str) -> str:
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    s = re.sub(r"[^A-Za-z0-9._-]+", "_", s)
+    return s.strip("_")
+
+
+def _report_filename(case_id: int, case_number: Optional[str], short_sale: bool) -> str:
+    base = f"case_{case_id}"
+    safe_case = _safe_filename_piece(case_number or "")
+    if safe_case:
+        base = f"{base}_{safe_case}"
+    if short_sale:
+        base = f"{base}_SHORT-SALE"
+    return f"{base}_report.pdf"
+
+
+def _is_short_sale(case: Case) -> bool:
+    arv_num = _parse_float(getattr(case, "arv", None), 0.0)
+    rehab_num = _parse_float(getattr(case, "rehab", None), 0.0)
+    closing_raw = getattr(case, "closing_costs", None)
+    try:
+        user_closing = float(closing_raw) if closing_raw not in (None, "") else None
+    except Exception:
+        user_closing = None
+    closing_num = user_closing if user_closing is not None else round(arv_num * 0.045, 2)
+
+    flip_rate = 0.85 if arv_num > 350000 else 0.80
+    flip_offer = round(
+        max(0.0, (arv_num * flip_rate) - rehab_num - closing_num),
+        2,
+    )
+
+    total_liens = _sum_liens_for_calc(case)
+    return total_liens > flip_offer
     if isinstance(raw, (int, float)):
         return float(raw)
     try:
@@ -526,7 +575,7 @@ def build_case_report_bytes(
     generated_str = _dt.datetime.now().strftime("%m/%d/%Y")
     c.drawString(layout.margin_x, layout.y, f"Generated: {generated_str}")
     layout.y -= 18
-    layout.line("Property Summary", size=11, bold=True)
+    layout.line("Executive Summary", size=11, bold=True)
 
     if short_sale_flag:
         c.saveState()
@@ -564,7 +613,10 @@ def build_case_report_bytes(
         deal_lines.append(("Max Seller in Hand Cash (after liens)", _fmt_money(seller_cash)))
 
     # Property Profile section (BatchData)
-    prop_lines = []
+    prop_snapshot_lines = []
+    valuation_lines = []
+    ownership_lines = []
+    demographic_lines = []
     if isinstance(primary_prop, dict):
         addr = primary_prop.get("address") or {}
         listing = primary_prop.get("listing") or {}
@@ -576,12 +628,17 @@ def build_case_report_bytes(
         tax = primary_prop.get("tax") or {}
         owner = primary_prop.get("owner") or {}
         owner_mail = owner.get("mailingAddress") or {}
+        ids = primary_prop.get("ids") or {}
+        location = primary_prop.get("location") or {}
+        demographics = primary_prop.get("demographics") or {}
 
         prop_type = (
             general.get("propertyTypeDetail")
             or general.get("propertyTypeCategory")
             or listing.get("propertyType")
         )
+        land_use = general.get("landUse")
+        zoning = general.get("zoning")
         year_built = general.get("yearBuilt") or primary_prop.get("yearBuilt") or listing.get("yearBuilt")
         sqft = (
             building.get("livingAreaSqft")
@@ -592,49 +649,102 @@ def build_case_report_bytes(
         lot_sqft = lot.get("lotSizeSqft") or listing.get("lotSizeSquareFeet")
         beds = building.get("bedrooms") or listing.get("bedroomCount")
         baths = building.get("totalBathrooms") or listing.get("bathroomCount")
+        stories = building.get("stories") or general.get("stories")
+        garage = building.get("garageSpaces") or building.get("garage") or general.get("garage")
+        pool = building.get("pool") or general.get("pool")
+        construction = building.get("constructionType") or general.get("constructionType")
+        roof = building.get("roofType") or general.get("roofType")
+        foundation = building.get("foundationType") or general.get("foundationType")
         low_range = valuation.get("lowRangeValue") or listing.get("minListPrice")
         high_range = valuation.get("highRangeValue") or listing.get("maxListPrice")
         assessed = assessment.get("totalAssessedValue")
         assessed_year = assessment.get("assessmentYear")
         taxes = tax.get("taxAmount")
         taxes_year = tax.get("taxYear")
+        apn = ids.get("apn") or primary_prop.get("apn") or primary_prop.get("parcelId")
+        county = addr.get("county") or general.get("county")
+        latitude = location.get("latitude") or addr.get("latitude")
+        longitude = location.get("longitude") or addr.get("longitude")
 
         owner_name = owner.get("fullName")
         if not owner_name and isinstance(owner.get("names"), list) and owner["names"]:
             owner_name = owner["names"][0].get("full") or owner["names"][0].get("first")
+        owner_type = owner.get("type") or owner.get("ownerType")
+        owner_occupied = owner.get("ownerOccupied") or general.get("ownerOccupied") or owner.get("occupancyStatus")
+
+        sales = primary_prop.get("sales") or primary_prop.get("sale") or primary_prop.get("transaction")
+        last_sale = None
+        if isinstance(sales, list) and sales:
+            last_sale = sales[0]
+        elif isinstance(sales, dict):
+            last_sale = sales
+        sale_date = None
+        sale_price = None
+        sale_type = None
+        if isinstance(last_sale, dict):
+            sale_date = last_sale.get("saleDate") or last_sale.get("lastSaleDate") or last_sale.get("recordingDate")
+            sale_price = last_sale.get("salePrice") or last_sale.get("saleAmount") or last_sale.get("price")
+            sale_type = last_sale.get("saleType") or last_sale.get("transactionType")
 
         if _present(prop_type):
-            prop_lines.append(("Property Type", prop_type))
+            prop_snapshot_lines.append(("Property Type", prop_type))
+        if _present(land_use):
+            prop_snapshot_lines.append(("Land Use", land_use))
+        if _present(zoning):
+            prop_snapshot_lines.append(("Zoning", zoning))
+        if _present(county):
+            prop_snapshot_lines.append(("County", county))
+        if _present(apn):
+            prop_snapshot_lines.append(("APN", apn))
+        if _present(latitude) and _present(longitude):
+            prop_snapshot_lines.append(("Coordinates", f"{latitude}, {longitude}"))
         if _parse_float(year_built) > 0:
-            prop_lines.append(("Year Built", year_built))
+            prop_snapshot_lines.append(("Year Built", year_built))
+        if _parse_float(stories) > 0:
+            prop_snapshot_lines.append(("Stories", stories))
         if _parse_float(sqft) > 0:
-            prop_lines.append(("Living Area (Sq Ft)", f"{_parse_float(sqft):,.0f}"))
+            prop_snapshot_lines.append(("Living Area (Sq Ft)", f"{_parse_float(sqft):,.0f}"))
         if _parse_float(lot_acres) > 0:
-            prop_lines.append(("Lot Size", f"{float(lot_acres):.3f} acres"))
+            prop_snapshot_lines.append(("Lot Size", f"{float(lot_acres):.3f} acres"))
         elif _parse_float(lot_sqft) > 0:
-            prop_lines.append(("Lot Size", f"{_parse_float(lot_sqft):,.0f} sq ft"))
+            prop_snapshot_lines.append(("Lot Size", f"{_parse_float(lot_sqft):,.0f} sq ft"))
         beds_val = _parse_float(beds)
         baths_val = _parse_float(baths)
         if beds_val > 0 or baths_val > 0:
             b = int(beds_val) if beds_val > 0 else ""
             ba = baths_val if baths_val > 0 else ""
-            prop_lines.append(("Beds / Baths", f"{b} / {ba}"))
+            prop_snapshot_lines.append(("Beds / Baths", f"{b} / {ba}"))
+        if _parse_float(garage) > 0:
+            prop_snapshot_lines.append(("Garage Spaces", garage))
+        if _present(pool):
+            prop_snapshot_lines.append(("Pool", pool))
+        if _present(construction):
+            prop_snapshot_lines.append(("Construction", construction))
+        if _present(roof):
+            prop_snapshot_lines.append(("Roof", roof))
+        if _present(foundation):
+            prop_snapshot_lines.append(("Foundation", foundation))
+
         if _parse_float(low_range) > 0 or _parse_float(high_range) > 0:
             low = _fmt_money(low_range) if _parse_float(low_range) > 0 else ""
             high = _fmt_money(high_range) if _parse_float(high_range) > 0 else ""
-            prop_lines.append(("Low / High Range", f"{low} - {high}".strip(" -")))
+            valuation_lines.append(("Low / High Range", f"{low} - {high}".strip(" -")))
         if _parse_float(assessed) > 0:
             assessed_val = _fmt_money(assessed)
             if _present(assessed_year):
                 assessed_val = f"{assessed_val} (Tax Year {assessed_year})"
-            prop_lines.append(("Assessed Value", assessed_val))
+            valuation_lines.append(("Assessed Value", assessed_val))
         if _parse_float(taxes) > 0:
             taxes_val = _fmt_money(taxes)
             if _present(taxes_year):
                 taxes_val = f"{taxes_val} (Tax Year {taxes_year})"
-            prop_lines.append(("Annual Taxes", taxes_val))
+            valuation_lines.append(("Annual Taxes", taxes_val))
         if _present(owner_name):
-            prop_lines.append(("Owner", owner_name))
+            ownership_lines.append(("Owner", owner_name))
+        if _present(owner_type):
+            ownership_lines.append(("Owner Type", owner_type))
+        if _present(owner_occupied):
+            ownership_lines.append(("Owner Occupied", owner_occupied))
         if isinstance(owner_mail, dict):
             mail_parts = []
             for part in [owner_mail.get("street"), owner_mail.get("city"), owner_mail.get("state")]:
@@ -645,17 +755,66 @@ def build_case_report_bytes(
                 mail_parts.append(str(zip_part).strip())
             mail = ", ".join(mail_parts)
             if _present(mail):
-                prop_lines.append(("Mailing Address", mail))
+                ownership_lines.append(("Mailing Address", mail))
+        if _present(sale_date):
+            ownership_lines.append(("Last Sale Date", sale_date))
+        if _parse_float(sale_price) > 0:
+            ownership_lines.append(("Last Sale Price", _fmt_money(sale_price)))
+        if _present(sale_type):
+            ownership_lines.append(("Sale Type", sale_type))
 
-    if prop_lines:
-        layout.section_title("Property Profile")
-        for label, val in prop_lines:
-            _add_line_if(label, val)
+        if isinstance(demographics, dict):
+            demo_age = demographics.get("age")
+            demo_gender = demographics.get("gender")
+            demo_marital = demographics.get("maritalStatus")
+            demo_children = demographics.get("childCount")
+            demo_income = demographics.get("income")
+            demo_net_worth = demographics.get("netWorth")
+            demo_occupation = demographics.get("individualOccupation")
+
+            if _present(demo_age):
+                demographic_lines.append(("Age", demo_age))
+            if _present(demo_gender):
+                demographic_lines.append(("Gender", demo_gender))
+            if _present(demo_marital):
+                demographic_lines.append(("Marital Status", demo_marital))
+            if _present(demo_children):
+                demographic_lines.append(("Children", demo_children))
+            if _parse_float(demo_income) > 0:
+                demographic_lines.append(("Income", _fmt_money(demo_income)))
+            elif _present(demo_income):
+                demographic_lines.append(("Income", demo_income))
+            if _parse_float(demo_net_worth) > 0:
+                demographic_lines.append(("Net Worth", _fmt_money(demo_net_worth)))
+            elif _present(demo_net_worth):
+                demographic_lines.append(("Net Worth", demo_net_worth))
+            if _present(demo_occupation):
+                demographic_lines.append(("Occupation", demo_occupation))
 
     if deal_lines:
         layout.section_title("Deal Summary")
         for label, val in deal_lines:
             layout.line(f"{label}: {val}")
+
+    if prop_snapshot_lines:
+        layout.section_title("Property Snapshot")
+        for label, val in prop_snapshot_lines:
+            _add_line_if(label, val)
+
+    if valuation_lines:
+        layout.section_title("Valuation & Taxes")
+        for label, val in valuation_lines:
+            _add_line_if(label, val)
+
+    if ownership_lines:
+        layout.section_title("Ownership & Transfer")
+        for label, val in ownership_lines:
+            _add_line_if(label, val)
+
+    if demographic_lines:
+        layout.section_title("Demographics")
+        for label, val in demographic_lines:
+            _add_line_if(label, val)
 
     # Outstanding Liens section
     if lien_rows:
@@ -722,7 +881,6 @@ def build_case_report_bytes(
             layout.line(f"- {stamp}{content}", size=9)
 
     # Attached Documents
-    layout.section_title("Attached Documents")
     attached_labels: List[str] = []
     vc = getattr(case, "verified_complaint_path", "") or ""
     mtg = getattr(case, "mortgage_path", "") or ""
@@ -761,10 +919,11 @@ def build_case_report_bytes(
         logger.warning("Failed to read summary PDF for case %s: %s", case_id, exc)
         out = io.BytesIO(summary_buf.getvalue())
         out.seek(0)
+        filename = _report_filename(case_id, getattr(case, "case_number", None), short_sale_flag)
         return StreamingResponse(
             out,
             media_type="application/pdf",
-            headers={"Content-Disposition": f"inline; filename=case_{case_id}_report.pdf"},
+            headers={"Content-Disposition": f"inline; filename={filename}"},
         )
 
     if include_attachments:
@@ -786,9 +945,17 @@ def build_case_report_bytes(
 
 
 def generate_case_report(case_id: int, db: Session) -> StreamingResponse:
+    getter = getattr(db, "get", None)
+    if callable(getter):
+        case = db.get(Case, case_id)
+    else:
+        case = db.query(Case).get(case_id)  # type: ignore[call-arg]
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+    filename = _report_filename(case_id, getattr(case, "case_number", None), _is_short_sale(case))
     out_buf = build_case_report_bytes(case_id, db, include_attachments=True)
     return StreamingResponse(
         out_buf,
         media_type="application/pdf",
-        headers={"Content-Disposition": f"inline; filename=case_{case_id}_report.pdf"},
+        headers={"Content-Disposition": f"inline; filename={filename}"},
     )

@@ -221,53 +221,7 @@
 </div>
 {% endif %}
 
-<!-- Cases by Month (Simple Bar Chart) -->
-{% if monthly_data %}
-<div class="chart-container">
-  <h3>Cases by Month</h3>
-  <canvas id="monthlyChart" width="400" height="150"></canvas>
-</div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
-<script>
-const monthlyData = {{ monthly_data | tojson | safe }};
-
-const ctx = document.getElementById('monthlyChart').getContext('2d');
-new Chart(ctx, {
-  type: 'bar',
-  data: {
-    labels: monthlyData.map(d => d.month).reverse(),
-    datasets: [{
-      label: 'Case Count',
-      data: monthlyData.map(d => d.count).reverse(),
-      backgroundColor: '#8b5cf6',
-      borderColor: '#7c3aed',
-      borderWidth: 1
-    }]
-  },
-  options: {
-    responsive: true,
-    maintainAspectRatio: false,
-    scales: {
-      y: {
-        beginAtZero: true,
-        ticks: { color: '#a7b0c0' },
-        grid: { color: '#263043' }
-      },
-      x: {
-        ticks: { color: '#a7b0c0' },
-        grid: { color: '#263043' }
-      }
-    },
-    plugins: {
-      legend: {
-        labels: { color: '#a7b0c0' }
-      }
-    }
-  }
-});
-</script>
-{% endif %}
 
 <!-- Top Opportunities -->
 {% if opportunities %}
