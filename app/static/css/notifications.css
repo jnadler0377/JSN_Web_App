@@ -1,0 +1,532 @@
+/* ===========================================
+   V2.0 Notifications CSS
+   Real-time notification bell and toasts
+   =========================================== */
+
+/* ---- Notification Bell ---- */
+.notification-bell {
+  position: relative;
+}
+
+.notification-btn {
+  background: transparent;
+  border: none;
+  color: #a7b0c0;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.notification-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.notification-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  background: #ef4444;
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+}
+
+/* ---- Notification Dropdown ---- */
+.notification-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  width: 360px;
+  max-height: 480px;
+  background: #1a1f2e;
+  border: 1px solid #2d3548;
+  border-radius: 12px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+  z-index: 1000;
+  display: none;
+  overflow: hidden;
+}
+
+.notification-dropdown.show {
+  display: block;
+  animation: slideDown 0.2s ease;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.notification-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid #2d3548;
+  background: #151929;
+}
+
+.notification-header h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.mark-all-read-btn {
+  background: transparent;
+  border: none;
+  color: #667eea;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.mark-all-read-btn:hover {
+  background: rgba(102, 126, 234, 0.1);
+}
+
+.notification-list {
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.notification-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.notification-list::-webkit-scrollbar-track {
+  background: #1a1f2e;
+}
+
+.notification-list::-webkit-scrollbar-thumb {
+  background: #3d4559;
+  border-radius: 3px;
+}
+
+.notification-empty {
+  padding: 40px 20px;
+  text-align: center;
+  color: #6b7280;
+  font-size: 14px;
+}
+
+.notification-item {
+  display: flex;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #2d3548;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.notification-item:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.notification-item.unread {
+  background: rgba(102, 126, 234, 0.08);
+  border-left: 3px solid #667eea;
+}
+
+.notification-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.notification-icon.info {
+  background: rgba(59, 130, 246, 0.15);
+  color: #3b82f6;
+}
+
+.notification-icon.success {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+}
+
+.notification-icon.warning {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+}
+
+.notification-icon.error {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.notification-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.notification-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.notification-message {
+  font-size: 12px;
+  color: #9ca3af;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.notification-time {
+  font-size: 11px;
+  color: #6b7280;
+  margin-top: 4px;
+}
+
+.notification-footer {
+  padding: 12px 16px;
+  border-top: 1px solid #2d3548;
+  text-align: center;
+  background: #151929;
+}
+
+.notification-footer a {
+  color: #667eea;
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.notification-footer a:hover {
+  text-decoration: underline;
+}
+
+/* ---- Toast Notifications ---- */
+.toast-container {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 400px;
+}
+
+.toast {
+  background: #1a1f2e;
+  border: 1px solid #2d3548;
+  border-radius: 10px;
+  padding: 14px 18px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  animation: toastIn 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.toast.exiting {
+  animation: toastOut 0.3s ease forwards;
+}
+
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes toastOut {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+}
+
+.toast::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+}
+
+.toast.info::before {
+  background: #3b82f6;
+}
+
+.toast.success::before {
+  background: #22c55e;
+}
+
+.toast.warning::before {
+  background: #f59e0b;
+}
+
+.toast.error::before {
+  background: #ef4444;
+}
+
+.toast-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.toast.info .toast-icon { color: #3b82f6; }
+.toast.success .toast-icon { color: #22c55e; }
+.toast.warning .toast-icon { color: #f59e0b; }
+.toast.error .toast-icon { color: #ef4444; }
+
+.toast-content {
+  flex: 1;
+}
+
+.toast-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 4px;
+}
+
+.toast-message {
+  font-size: 13px;
+  color: #9ca3af;
+  line-height: 1.4;
+}
+
+.toast-close {
+  background: transparent;
+  border: none;
+  color: #6b7280;
+  cursor: pointer;
+  padding: 4px;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.toast-close:hover {
+  color: #fff;
+}
+
+.toast-action {
+  margin-top: 10px;
+}
+
+.toast-action a {
+  background: rgba(102, 126, 234, 0.2);
+  color: #667eea;
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  text-decoration: none;
+  display: inline-block;
+}
+
+.toast-action a:hover {
+  background: rgba(102, 126, 234, 0.3);
+}
+
+/* ---- Deal Score Badge ---- */
+.deal-score-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.deal-score-badge.excellent {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.deal-score-badge.good {
+  background: rgba(59, 130, 246, 0.15);
+  color: #3b82f6;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.deal-score-badge.fair {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.deal-score-badge.poor {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.deal-score-number {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+/* ---- Deal Analysis Card ---- */
+.deal-analysis-card {
+  background: var(--panel, #1a1f2e);
+  border: 1px solid #263043;
+  border-radius: 12px;
+  padding: 16px;
+  margin: 16px 0;
+}
+
+.deal-analysis-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.deal-analysis-header h4 {
+  margin: 0;
+  font-size: 14px;
+  color: var(--muted, #6b7280);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.deal-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.deal-metric {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  padding: 12px;
+  text-align: center;
+}
+
+.deal-metric-label {
+  font-size: 11px;
+  color: var(--muted, #6b7280);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.deal-metric-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.deal-metric-value.positive {
+  color: #22c55e;
+}
+
+.deal-metric-value.negative {
+  color: #ef4444;
+}
+
+.deal-recommendations {
+  border-top: 1px solid #263043;
+  padding-top: 12px;
+}
+
+.deal-recommendations h5 {
+  font-size: 12px;
+  color: var(--muted, #6b7280);
+  text-transform: uppercase;
+  margin: 0 0 10px 0;
+}
+
+.recommendation-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.recommendation-tag {
+  background: rgba(102, 126, 234, 0.1);
+  color: #a5b4fc;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+/* ---- Loading States ---- */
+.deal-analysis-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  color: var(--muted, #6b7280);
+}
+
+.deal-analysis-loading .spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid #2d3548;
+  border-top-color: #667eea;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-right: 12px;
+}
+
+/* ---- Responsive ---- */
+@media (max-width: 768px) {
+  .notification-dropdown {
+    width: calc(100vw - 32px);
+    right: -60px;
+  }
+  
+  .toast-container {
+    left: 16px;
+    right: 16px;
+    bottom: 16px;
+    max-width: none;
+  }
+}

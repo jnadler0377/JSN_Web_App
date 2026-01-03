@@ -1,255 +1,226 @@
-<!-- app/templates/dashboard.html -->
 {% extends "base.html" %}
+{% block title %}Dashboard - JSN Holdings{% endblock %}
+
 {% block content %}
-
-<style>
-.dashboard-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: 1rem;
-  margin-bottom: 2rem;
-}
-
-.metric-card {
-  background: var(--panel);
-  border-radius: 10px;
-  padding: 1.25rem;
-  border: 1px solid #263043;
-}
-
-.metric-card h3 {
-  margin: 0 0 0.5rem 0;
-  font-size: 0.9rem;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.metric-value {
-  font-size: 2rem;
-  font-weight: 700;
-  color: var(--text);
-  margin: 0.5rem 0;
-}
-
-.metric-change {
-  font-size: 0.85rem;
-  color: #6ee7b7;
-}
-
-.metric-change.negative {
-  color: #fca5a5;
-}
-
-.chart-container {
-  background: var(--panel);
-  border-radius: 10px;
-  padding: 1.5rem;
-  border: 1px solid #263043;
-  margin-bottom: 1.5rem;
-}
-
-.opportunities-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.9rem;
-}
-
-.opportunities-table th,
-.opportunities-table td {
-  padding: 0.75rem;
-  text-align: left;
-  border-bottom: 1px solid #263043;
-}
-
-.opportunities-table th {
-  background: #0f1629;
-  color: var(--muted);
-  font-weight: 600;
-  text-transform: uppercase;
-  font-size: 0.75rem;
-  letter-spacing: 0.05em;
-}
-
-.opportunities-table tr:hover {
-  background: #0f1629;
-  cursor: pointer;
-}
-
-.funnel-container {
-  display: flex;
-  gap: 1rem;
-  margin-top: 1rem;
-}
-
-.funnel-stage {
-  flex: 1;
-  background: var(--panel);
-  border-radius: 8px;
-  padding: 1rem;
-  text-align: center;
-  position: relative;
-}
-
-.funnel-stage::after {
-  content: '→';
-  position: absolute;
-  right: -1.5rem;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 1.5rem;
-  color: var(--muted);
-}
-
-.funnel-stage:last-child::after {
-  display: none;
-}
-
-.funnel-count {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: var(--text);
-}
-
-.funnel-label {
-  font-size: 0.85rem;
-  color: var(--muted);
-  margin-top: 0.25rem;
-}
-
-.funnel-rate {
-  font-size: 0.75rem;
-  color: #6ee7b7;
-  margin-top: 0.5rem;
-}
-</style>
-
-<h2>Analytics Dashboard</h2>
+<div class="page-header">
+    <h1 class="page-title">Dashboard</h1>
+    <p class="page-subtitle">Welcome back! Here's an overview of your foreclosure pipeline.</p>
+</div>
 
 <!-- Key Metrics -->
-<div class="dashboard-grid">
-  <div class="metric-card">
-    <h3>Total Cases</h3>
-    <div class="metric-value">{{ metrics.total_cases | default(0) }}</div>
-    <div class="metric-change">{{ metrics.new_cases_30d | default(0) }} new this month</div>
-  </div>
-
-  <div class="metric-card">
-    <h3>Active Pipeline</h3>
-    <div class="metric-value">{{ metrics.active_cases | default(0) }}</div>
-    <div class="metric-change">{{ metrics.high_value_count | default(0) }} high-value</div>
-  </div>
-
-  <div class="metric-card">
-    <h3>Avg ARV</h3>
-    <div class="metric-value">${{ "{:,.0f}".format(metrics.avg_arv | default(0)) }}</div>
-    <div class="metric-change">{{ metrics.avg_rehab | default(0) | round(0) | int }} avg rehab</div>
-  </div>
-
-  <div class="metric-card">
-    <h3>Potential Profit</h3>
-    <div class="metric-value">${{ "{:,.0f}".format(metrics.total_potential_profit | default(0)) }}</div>
-    <div class="metric-change">Total pipeline value</div>
-  </div>
-
-  <div class="metric-card">
-    <h3>Short Sales</h3>
-    <div class="metric-value">{{ metrics.short_sale_count | default(0) }}</div>
-    <div class="metric-change">Liens exceed offer</div>
-  </div>
-
-  <div class="metric-card">
-    <h3>Owner Occupied</h3>
-    <div class="metric-value">{{ metrics.owner_occupied_count | default(0) }}</div>
-    <div class="metric-change">{{ metrics.high_equity_count | default(0) }} high equity</div>
-  </div>
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-icon purple">📊</div>
+        <div class="stat-value">{{ metrics.total_cases | default(0) }}</div>
+        <div class="stat-label">Total Cases</div>
+        <div class="stat-change positive">
+            <span>+{{ metrics.new_cases_30d | default(0) }}</span> this month
+        </div>
+    </div>
+    
+    <div class="stat-card">
+        <div class="stat-icon green">🎯</div>
+        <div class="stat-value">{{ metrics.active_cases | default(0) }}</div>
+        <div class="stat-label">Active Pipeline</div>
+        <div class="stat-change positive">
+            {{ metrics.high_value_count | default(0) }} high-value
+        </div>
+    </div>
+    
+    <div class="stat-card">
+        <div class="stat-icon blue">💰</div>
+        <div class="stat-value">${{ "{:,.0f}".format(metrics.avg_arv | default(0)) }}</div>
+        <div class="stat-label">Average ARV</div>
+        <div class="stat-change">
+            ${{ "{:,.0f}".format(metrics.avg_rehab | default(0)) }} avg rehab
+        </div>
+    </div>
+    
+    <div class="stat-card">
+        <div class="stat-icon orange">📈</div>
+        <div class="stat-value">${{ "{:,.0f}".format(metrics.total_potential_profit | default(0)) }}</div>
+        <div class="stat-label">Pipeline Value</div>
+        <div class="stat-change positive">
+            Total potential profit
+        </div>
+    </div>
 </div>
 
-<!-- Conversion Funnel -->
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-lg); margin-bottom: var(--space-xl);">
+    <div class="stat-card">
+        <div class="stat-icon" style="background: var(--warning-light); color: var(--warning);">⚠️</div>
+        <div class="stat-value">{{ metrics.short_sale_count | default(0) }}</div>
+        <div class="stat-label">Short Sales</div>
+        <div class="stat-change">Liens exceed offer</div>
+    </div>
+    
+    <div class="stat-card">
+        <div class="stat-icon" style="background: rgba(102, 126, 234, 0.1); color: var(--primary);">🏠</div>
+        <div class="stat-value">{{ metrics.owner_occupied_count | default(0) }}</div>
+        <div class="stat-label">Owner Occupied</div>
+        <div class="stat-change positive">{{ metrics.high_equity_count | default(0) }} high equity</div>
+    </div>
+</div>
+
+<!-- Deal Pipeline Funnel -->
 {% if funnel %}
-<div class="chart-container">
-  <h3>Deal Pipeline</h3>
-  <div class="funnel-container">
-    <div class="funnel-stage">
-      <div class="funnel-count">{{ funnel.total_leads }}</div>
-      <div class="funnel-label">Total Leads</div>
+<div class="card" style="margin-bottom: var(--space-xl);">
+    <div class="card-header">
+        <h3 class="card-title">Deal Pipeline</h3>
     </div>
-    <div class="funnel-stage">
-      <div class="funnel-count">{{ funnel.contacted }}</div>
-      <div class="funnel-label">Contacted</div>
-      <div class="funnel-rate">{{ funnel.contact_rate | default(0) }}%</div>
+    <div class="card-body">
+        <div style="display: flex; gap: var(--space-md); align-items: center;">
+            <div style="flex: 1; text-align: center; padding: var(--space-lg); background: var(--bg-alt); border-radius: var(--radius-md);">
+                <div style="font-size: 28px; font-weight: 700; color: var(--text);">{{ funnel.total_leads }}</div>
+                <div style="font-size: 13px; color: var(--text-secondary); margin-top: 4px;">Total Leads</div>
+            </div>
+            <div style="color: var(--text-muted); font-size: 24px;">→</div>
+            <div style="flex: 1; text-align: center; padding: var(--space-lg); background: var(--bg-alt); border-radius: var(--radius-md);">
+                <div style="font-size: 28px; font-weight: 700; color: var(--text);">{{ funnel.contacted }}</div>
+                <div style="font-size: 13px; color: var(--text-secondary); margin-top: 4px;">Contacted</div>
+                <div style="font-size: 12px; color: var(--success); margin-top: 4px;">{{ funnel.contact_rate | default(0) }}%</div>
+            </div>
+            <div style="color: var(--text-muted); font-size: 24px;">→</div>
+            <div style="flex: 1; text-align: center; padding: var(--space-lg); background: var(--bg-alt); border-radius: var(--radius-md);">
+                <div style="font-size: 28px; font-weight: 700; color: var(--text);">{{ funnel.offer_sent }}</div>
+                <div style="font-size: 13px; color: var(--text-secondary); margin-top: 4px;">Offers Sent</div>
+                <div style="font-size: 12px; color: var(--success); margin-top: 4px;">{{ funnel.offer_rate | default(0) }}%</div>
+            </div>
+            <div style="color: var(--text-muted); font-size: 24px;">→</div>
+            <div style="flex: 1; text-align: center; padding: var(--space-lg); background: var(--bg-alt); border-radius: var(--radius-md);">
+                <div style="font-size: 28px; font-weight: 700; color: var(--text);">{{ funnel.offer_accepted }}</div>
+                <div style="font-size: 13px; color: var(--text-secondary); margin-top: 4px;">Accepted</div>
+            </div>
+            <div style="color: var(--text-muted); font-size: 24px;">→</div>
+            <div style="flex: 1; text-align: center; padding: var(--space-lg); background: var(--success-light); border-radius: var(--radius-md);">
+                <div style="font-size: 28px; font-weight: 700; color: var(--success);">{{ funnel.closed_won }}</div>
+                <div style="font-size: 13px; color: var(--text-secondary); margin-top: 4px;">Closed Won</div>
+                <div style="font-size: 12px; color: var(--success); margin-top: 4px;">{{ funnel.close_rate | default(0) }}%</div>
+            </div>
+        </div>
     </div>
-    <div class="funnel-stage">
-      <div class="funnel-count">{{ funnel.offer_sent }}</div>
-      <div class="funnel-label">Offers Sent</div>
-      <div class="funnel-rate">{{ funnel.offer_rate | default(0) }}%</div>
-    </div>
-    <div class="funnel-stage">
-      <div class="funnel-count">{{ funnel.offer_accepted }}</div>
-      <div class="funnel-label">Accepted</div>
-    </div>
-    <div class="funnel-stage">
-      <div class="funnel-count">{{ funnel.closed_won }}</div>
-      <div class="funnel-label">Closed Won</div>
-      <div class="funnel-rate">{{ funnel.close_rate | default(0) }}%</div>
-    </div>
-  </div>
 </div>
 {% endif %}
 
-<!-- ROI Analysis -->
-{% if roi and roi.total_deals > 0 %}
-<div class="chart-container">
-  <h3>ROI Performance</h3>
-  <div class="dashboard-grid" style="margin-top: 1rem;">
-    <div>
-      <strong>Total Deals:</strong> {{ roi.total_deals }}
+<!-- AI Deal Score Distribution -->
+<div class="card" style="margin-bottom: var(--space-xl);">
+    <div class="card-header">
+        <h3 class="card-title">🤖 AI Deal Score Distribution</h3>
     </div>
-    <div>
-      <strong>Avg Purchase:</strong> ${{ "{:,.0f}".format(roi.avg_purchase_price) }}
+    <div class="card-body">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-xl); align-items: center;">
+            <div style="height: 220px;">
+                <canvas id="scoreDistributionChart"></canvas>
+            </div>
+            <div>
+                <div style="display: flex; flex-direction: column; gap: var(--space-md);">
+                    <div style="display: flex; align-items: center; gap: var(--space-md); padding: var(--space-sm) var(--space-md); background: var(--success-light); border-radius: var(--radius-md);">
+                        <span style="width: 12px; height: 12px; border-radius: 50%; background: var(--success);"></span>
+                        <span style="color: var(--text); font-size: 14px; flex: 1;">Excellent (80-100)</span>
+                        <span style="font-weight: 700; color: var(--success);" id="count-excellent">0</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: var(--space-md); padding: var(--space-sm) var(--space-md); background: var(--info-light); border-radius: var(--radius-md);">
+                        <span style="width: 12px; height: 12px; border-radius: 50%; background: var(--info);"></span>
+                        <span style="color: var(--text); font-size: 14px; flex: 1;">Good (60-79)</span>
+                        <span style="font-weight: 700; color: var(--info);" id="count-good">0</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: var(--space-md); padding: var(--space-sm) var(--space-md); background: var(--warning-light); border-radius: var(--radius-md);">
+                        <span style="width: 12px; height: 12px; border-radius: 50%; background: var(--warning);"></span>
+                        <span style="color: var(--text); font-size: 14px; flex: 1;">Fair (40-59)</span>
+                        <span style="font-weight: 700; color: #b45309;" id="count-fair">0</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: var(--space-md); padding: var(--space-sm) var(--space-md); background: var(--danger-light); border-radius: var(--radius-md);">
+                        <span style="width: 12px; height: 12px; border-radius: 50%; background: var(--danger);"></span>
+                        <span style="color: var(--text); font-size: 14px; flex: 1;">Poor (0-39)</span>
+                        <span style="font-weight: 700; color: var(--danger);" id="count-poor">0</span>
+                    </div>
+                </div>
+                <div style="margin-top: var(--space-lg); padding-top: var(--space-md); border-top: 1px solid var(--border);">
+                    <span style="color: var(--text-secondary); font-size: 14px;">Total Analyzed: </span>
+                    <span style="font-weight: 700; color: var(--text); font-size: 18px;" id="count-total">0</span>
+                </div>
+            </div>
+        </div>
     </div>
-    <div>
-      <strong>Avg ARV:</strong> ${{ "{:,.0f}".format(roi.avg_arv) }}
-    </div>
-    <div>
-      <strong>Avg Profit:</strong> ${{ "{:,.0f}".format(roi.avg_profit) }}
-    </div>
-    <div>
-      <strong>Avg ROI:</strong> {{ roi.avg_roi_pct }}%
-    </div>
-  </div>
 </div>
-{% endif %}
-
-
 
 <!-- Top Opportunities -->
 {% if opportunities %}
-<div class="chart-container">
-  <h3>Top Opportunities</h3>
-  <table class="opportunities-table">
-    <thead>
-      <tr>
-        <th>Case #</th>
-        <th>Address</th>
-        <th>ARV</th>
-        <th>Potential Profit</th>
-        <th>Status</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for opp in opportunities %}
-      <tr onclick="window.location.href='/cases/{{ opp.id }}'">
-        <td>{{ opp.case_number }}</td>
-        <td>{{ opp.address[:40] }}{% if opp.address|length > 40 %}...{% endif %}</td>
-        <td>${{ "{:,.0f}".format(opp.arv) }}</td>
-        <td><strong>${{ "{:,.0f}".format(opp.potential_profit) }}</strong></td>
-        <td>{{ opp.status | title }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Top Opportunities</h3>
+        <a href="/cases" class="btn btn-secondary btn-sm">View All</a>
+    </div>
+    <div class="table-container" style="border: none; border-radius: 0;">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Case #</th>
+                    <th>Address</th>
+                    <th>ARV</th>
+                    <th>Potential Profit</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for opp in opportunities %}
+                <tr onclick="window.location.href='/cases/{{ opp.id }}'" style="cursor: pointer;">
+                    <td><strong>{{ opp.case_number }}</strong></td>
+                    <td>{{ opp.address[:40] }}{% if opp.address|length > 40 %}...{% endif %}</td>
+                    <td>${{ "{:,.0f}".format(opp.arv) }}</td>
+                    <td><span style="color: var(--success); font-weight: 600;">${{ "{:,.0f}".format(opp.potential_profit) }}</span></td>
+                    <td><span class="badge badge-primary">{{ opp.status | title }}</span></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
 </div>
 {% endif %}
 
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', async function() {
+    try {
+        const response = await fetch('/api/v2/analytics/deal-distribution');
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        const dist = data.distribution || {};
+        
+        // Update counts
+        document.getElementById('count-excellent').textContent = dist.excellent || 0;
+        document.getElementById('count-good').textContent = dist.good || 0;
+        document.getElementById('count-fair').textContent = dist.fair || 0;
+        document.getElementById('count-poor').textContent = dist.poor || 0;
+        document.getElementById('count-total').textContent = data.total_analyzed || 0;
+        
+        // Create chart
+        const ctx = document.getElementById('scoreDistributionChart');
+        if (ctx && typeof Chart !== 'undefined') {
+            new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Excellent', 'Good', 'Fair', 'Poor'],
+                    datasets: [{
+                        data: [dist.excellent || 0, dist.good || 0, dist.fair || 0, dist.poor || 0],
+                        backgroundColor: ['#10b981', '#3b82f6', '#f59e0b', '#ef4444'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '65%',
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+    } catch (e) {
+        console.error('Error loading deal distribution:', e);
+    }
+});
+</script>
 {% endblock %}

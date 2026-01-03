@@ -1,0 +1,246 @@
+{# templates/cases/_deal_analysis_component.html - V3 Design #}
+
+<div class="deal-analysis-section">
+    <div id="deal-analysis-container">
+        <div class="deal-analysis-loading">
+            <div class="spinner"></div>
+            <span>Analyzing deal...</span>
+        </div>
+    </div>
+    
+    <div style="margin-top: 16px; text-align: right;">
+        <button class="btn btn-secondary btn-sm" onclick="refreshDealAnalysis()">
+            🔄 Re-analyze Deal
+        </button>
+    </div>
+</div>
+
+<script>
+(function() {
+    const caseId = {{ case.id }};
+    
+    // Template values (server-side)
+    const templateArv = {{ arv|default(0)|float }};
+    const templateRehab = {{ rehab|default(0)|float }};
+    const templateClosing = {{ closing_input|default(0)|float }};
+    
+    // Get values from the Overview tab form fields (for any client-side changes)
+    function getPageValues() {
+        // Get ARV from input
+        const arvInput = document.querySelector('input[name="arv"]');
+        let arv = templateArv;
+        if (arvInput && arvInput.value) {
+            const parsed = parseFloat(arvInput.value.replace(/[^0-9.]/g, ''));
+            if (!isNaN(parsed) && parsed > 0) arv = parsed;
+        }
+        
+        // Get Rehab from input
+        const rehabInput = document.querySelector('input[name="rehab"]');
+        let rehab = templateRehab;
+        if (rehabInput && rehabInput.value) {
+            const parsed = parseFloat(rehabInput.value.replace(/[^0-9.]/g, ''));
+            if (!isNaN(parsed) && parsed > 0) rehab = parsed;
+        }
+        
+        // Get Closing Costs from input
+        const closingInput = document.querySelector('input[name="closing_costs"]');
+        let closingCosts = templateClosing;
+        if (closingInput && closingInput.value) {
+            const parsed = parseFloat(closingInput.value.replace(/[^0-9.]/g, ''));
+            if (!isNaN(parsed) && parsed > 0) closingCosts = parsed;
+        }
+        
+        // Calculate total liens from the liens list (global variable from case_detail.html)
+        let totalLiens = 0;
+        if (typeof liens !== 'undefined' && Array.isArray(liens)) {
+            liens.forEach(l => {
+                const amt = parseFloat((l.amount || '').toString().replace(/[^0-9.]/g, '')) || 0;
+                totalLiens += amt;
+            });
+        }
+        
+        return { arv, rehab, closingCosts, totalLiens };
+    }
+    
+    async function loadAnalysis() {
+        const container = document.getElementById('deal-analysis-container');
+        if (!container) return;
+        
+        // Get current page values first
+        const pageValues = getPageValues();
+        console.log('Deal Analysis - Page values:', pageValues);
+        
+        try {
+            const response = await fetch(`/api/v2/cases/${caseId}/analyze`, {
+                method: 'POST'
+            });
+            
+            if (!response.ok) throw new Error('Analysis failed');
+            
+            const analysis = await response.json();
+            console.log('Deal Analysis - API response:', analysis);
+            
+            if (analysis.error) {
+                container.innerHTML = `
+                    <div class="deal-analysis-error">
+                        <p style="margin: 0;">Unable to analyze: ${escapeHtml(analysis.error)}</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            const { score, metrics, recommendations } = analysis;
+            const scoreClass = getScoreClass(score);
+            
+            // Use page values as primary, fall back to API values
+            const displayArv = pageValues.arv || metrics.arv || 0;
+            const displayRehab = pageValues.rehab || metrics.rehab || 0;
+            const displayClosing = pageValues.closingCosts || metrics.closing_costs || 0;
+            const displayLiens = pageValues.totalLiens || metrics.total_liens || 0;
+            
+            console.log('Deal Analysis - Display values:', { displayArv, displayRehab, displayClosing, displayLiens });
+            
+            container.innerHTML = `
+                <div class="deal-analysis-card">
+                    <div class="deal-analysis-header">
+                        <h4>🤖 AI Deal Analysis</h4>
+                        <div class="deal-score-badge ${scoreClass}">
+                            <span style="font-size: 24px;">${score}</span>
+                            <span style="font-size: 14px; opacity: 0.8;">/100</span>
+                        </div>
+                    </div>
+                    
+                    <div class="deal-metrics-grid">
+                        <div class="deal-metric">
+                            <div class="deal-metric-label">Max Offer (70%)</div>
+                            <div class="deal-metric-value">${formatCurrency(metrics.max_offer)}</div>
+                        </div>
+                        <div class="deal-metric">
+                            <div class="deal-metric-label">Est. Profit</div>
+                            <div class="deal-metric-value ${metrics.estimated_profit >= 0 ? 'positive' : 'negative'}">
+                                ${formatCurrency(metrics.estimated_profit)}
+                            </div>
+                        </div>
+                        <div class="deal-metric">
+                            <div class="deal-metric-label">ROI</div>
+                            <div class="deal-metric-value ${metrics.roi_pct >= 20 ? 'positive' : ''}">
+                                ${formatPercent(metrics.roi_pct)}
+                            </div>
+                        </div>
+                        <div class="deal-metric">
+                            <div class="deal-metric-label">Equity</div>
+                            <div class="deal-metric-value ${metrics.equity_pct >= 30 ? 'positive' : ''}">
+                                ${formatPercent(metrics.equity_pct)}
+                            </div>
+                        </div>
+                        <div class="deal-metric">
+                            <div class="deal-metric-label">Deal Quality</div>
+                            <div class="deal-metric-value">${metrics.deal_quality || 'N/A'}</div>
+                        </div>
+                    </div>
+                    
+                    ${recommendations && recommendations.length > 0 ? `
+                        <div class="deal-recommendations">
+                            <h5>AI Recommendations</h5>
+                            <div class="recommendation-list">
+                                ${recommendations.map(rec => `
+                                    <span class="recommendation-tag">${escapeHtml(rec)}</span>
+                                `).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+                    
+                    <div style="margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border);">
+                        <h5 style="margin: 0 0 12px 0; font-size: 14px; color: var(--text-secondary);">Calculation Breakdown</h5>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 13px;">
+                            <div style="display: flex; justify-content: space-between; padding: 8px; background: var(--bg-alt); border-radius: 6px;">
+                                <span style="color: var(--text-muted);">ARV</span>
+                                <span>${formatCurrency(displayArv)}</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; padding: 8px; background: var(--bg-alt); border-radius: 6px;">
+                                <span style="color: var(--text-muted);">Total Liens</span>
+                                <span style="color: var(--danger);">${formatCurrency(displayLiens)}</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; padding: 8px; background: var(--bg-alt); border-radius: 6px;">
+                                <span style="color: var(--text-muted);">Rehab Est.</span>
+                                <span>${formatCurrency(displayRehab)}</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; padding: 8px; background: var(--bg-alt); border-radius: 6px;">
+                                <span style="color: var(--text-muted);">Closing Costs</span>
+                                <span>${formatCurrency(displayClosing)}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+        } catch (error) {
+            console.error('Error loading analysis:', error);
+            
+            // Even if API fails, show the page values
+            const pageValues = getPageValues();
+            container.innerHTML = `
+                <div class="deal-analysis-error">
+                    <p style="margin: 0 0 16px 0;">Unable to fetch AI analysis. Showing current values:</p>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 13px;">
+                        <div style="display: flex; justify-content: space-between; padding: 8px; background: var(--bg-alt); border-radius: 6px;">
+                            <span>ARV</span>
+                            <span>${formatCurrency(pageValues.arv)}</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding: 8px; background: var(--bg-alt); border-radius: 6px;">
+                            <span>Total Liens</span>
+                            <span style="color: var(--danger);">${formatCurrency(pageValues.totalLiens)}</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding: 8px; background: var(--bg-alt); border-radius: 6px;">
+                            <span>Rehab Est.</span>
+                            <span>${formatCurrency(pageValues.rehab)}</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; padding: 8px; background: var(--bg-alt); border-radius: 6px;">
+                            <span>Closing Costs</span>
+                            <span>${formatCurrency(pageValues.closingCosts)}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+    }
+    
+    function getScoreClass(score) {
+        if (score >= 80) return 'excellent';
+        if (score >= 60) return 'good';
+        if (score >= 40) return 'fair';
+        return 'poor';
+    }
+    
+    function formatCurrency(val) {
+        if (!val || isNaN(val)) return '$0.00';
+        return '$' + parseFloat(val).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    
+    function formatPercent(val) {
+        if (!val || isNaN(val)) return '0%';
+        return Math.round(val) + '%';
+    }
+    
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    
+    // Make refresh function available globally
+    window.refreshDealAnalysis = loadAnalysis;
+    
+    // Load when Deal Analysis tab is activated, or on page load with delay
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function() {
+            // Wait for liens to load first
+            setTimeout(loadAnalysis, 800);
+        });
+    } else {
+        // Wait for liens to load first
+        setTimeout(loadAnalysis, 800);
+    }
+})();
+</script>

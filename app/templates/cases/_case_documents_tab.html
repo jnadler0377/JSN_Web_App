@@ -1,0 +1,903 @@
+{# templates/cases/_case_documents_tab.html - Document Management System #}
+
+<div class="documents-section">
+    <!-- Document Stats -->
+    <div class="doc-stats-bar" id="doc-stats">
+        <div class="doc-stat">
+            <span class="doc-stat-value" id="stat-total-docs">0</span>
+            <span class="doc-stat-label">Documents</span>
+        </div>
+        <div class="doc-stat">
+            <span class="doc-stat-value" id="stat-total-size">0 B</span>
+            <span class="doc-stat-label">Total Size</span>
+        </div>
+        <div class="doc-stat">
+            <span class="doc-stat-value" id="stat-doc-types">0</span>
+            <span class="doc-stat-label">Categories</span>
+        </div>
+    </div>
+
+    <!-- Upload Section -->
+    <div class="doc-upload-section">
+        <h4>📤 Upload Document</h4>
+        <form id="doc-upload-form" enctype="multipart/form-data">
+            <div class="upload-row">
+                <div class="upload-field">
+                    <label>Document Type</label>
+                    <select name="document_type" id="doc-type-select" required>
+                        <option value="">Select type...</option>
+                        <option value="verified_complaint">Verified Complaint</option>
+                        <option value="mortgage">Mortgage</option>
+                        <option value="current_deed">Current Deed</option>
+                        <option value="previous_deed">Previous Deed</option>
+                        <option value="value_calc">Value Calculation</option>
+                        <option value="appraisal">Appraisal</option>
+                        <option value="title_report">Title Report</option>
+                        <option value="inspection_report">Inspection Report</option>
+                        <option value="photos">Photos</option>
+                        <option value="contract">Contract</option>
+                        <option value="lien">Lien Document</option>
+                        <option value="tax_record">Tax Record</option>
+                        <option value="other">Other</option>
+                    </select>
+                </div>
+                <div class="upload-field" style="flex: 2;">
+                    <label>File</label>
+                    <input type="file" name="file" id="doc-file-input" required>
+                </div>
+                <div class="upload-field" style="flex: 2;">
+                    <label>Description (optional)</label>
+                    <input type="text" name="description" id="doc-description" placeholder="Brief description...">
+                </div>
+                <div class="upload-field" style="flex: 0;">
+                    <label>&nbsp;</label>
+                    <button type="submit" class="btn btn-primary" id="upload-btn">
+                        <span class="upload-text">Upload</span>
+                        <span class="upload-spinner" style="display: none;">⏳</span>
+                    </button>
+                </div>
+            </div>
+        </form>
+        <div id="upload-status" class="upload-status" style="display: none;"></div>
+    </div>
+
+    <!-- Documents List -->
+    <div class="doc-list-section">
+        <h4>📁 Documents</h4>
+        <div id="documents-container">
+            <div class="loading-docs">
+                <div class="spinner"></div>
+                <span>Loading documents...</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.documents-section {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+.doc-stats-bar {
+    display: flex;
+    gap: 24px;
+    padding: 16px;
+    background: var(--bg-alt);
+    border-radius: var(--radius-md);
+}
+
+.doc-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.doc-stat-value {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--primary);
+}
+
+.doc-stat-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+
+.doc-upload-section {
+    padding: 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+}
+
+.doc-upload-section h4 {
+    margin: 0 0 16px 0;
+    font-size: 16px;
+}
+
+.upload-row {
+    display: flex;
+    gap: 16px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+}
+
+.upload-field {
+    flex: 1;
+    min-width: 150px;
+}
+
+.upload-field label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+}
+
+.upload-field input[type="file"] {
+    padding: 8px;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-sm);
+    width: 100%;
+    background: var(--bg-alt);
+}
+
+.upload-status {
+    margin-top: 12px;
+    padding: 10px 14px;
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+}
+
+.upload-status.success {
+    background: rgba(16, 185, 129, 0.1);
+    color: var(--success);
+    border: 1px solid var(--success);
+}
+
+.upload-status.error {
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--danger);
+    border: 1px solid var(--danger);
+}
+
+.upload-status.duplicate {
+    background: rgba(245, 158, 11, 0.1);
+    color: var(--warning);
+    border: 1px solid var(--warning);
+}
+
+.doc-list-section h4 {
+    margin: 0 0 16px 0;
+    font-size: 16px;
+}
+
+.loading-docs {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 40px;
+    color: var(--text-muted);
+}
+
+.doc-group {
+    margin-bottom: 20px;
+}
+
+.doc-group-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    background: linear-gradient(135deg, var(--primary), var(--primary-dark, #5a67d8));
+    color: white;
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.doc-group-count {
+    background: rgba(255,255,255,0.2);
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 12px;
+}
+
+.doc-list {
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+}
+
+.doc-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    transition: background 0.15s;
+}
+
+.doc-item:last-child {
+    border-bottom: none;
+}
+
+.doc-item:hover {
+    background: var(--bg-alt);
+}
+
+.doc-icon {
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-alt);
+    border-radius: var(--radius-sm);
+    font-size: 20px;
+}
+
+.doc-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.doc-filename {
+    font-weight: 500;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.doc-meta {
+    display: flex;
+    gap: 12px;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 4px;
+}
+
+.doc-version {
+    background: var(--primary);
+    color: white;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.doc-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.doc-actions .btn-icon {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.doc-actions .btn-icon:hover {
+    background: var(--bg-alt);
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+.doc-actions .btn-icon.delete:hover {
+    border-color: var(--danger);
+    color: var(--danger);
+}
+
+.no-docs {
+    text-align: center;
+    padding: 40px;
+    color: var(--text-muted);
+}
+
+.no-docs-icon {
+    font-size: 48px;
+    margin-bottom: 12px;
+}
+
+/* OCR Modal Styles */
+.ocr-modal-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+}
+
+.ocr-modal-content {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    width: 90%;
+    max-width: 600px;
+    max-height: 80vh;
+    overflow: hidden;
+    z-index: 1001;
+    display: flex;
+    flex-direction: column;
+}
+
+.ocr-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+}
+
+.ocr-modal-header h3 {
+    margin: 0;
+    font-size: 18px;
+}
+
+.ocr-modal-body {
+    padding: 20px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.ocr-modal-footer {
+    padding: 16px 20px;
+    border-top: 1px solid var(--border);
+    text-align: right;
+}
+
+.ocr-section {
+    margin-bottom: 20px;
+}
+
+.ocr-section h4 {
+    font-size: 14px;
+    margin: 0 0 10px 0;
+    color: var(--text-secondary);
+}
+
+.ocr-section ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.ocr-section li {
+    padding: 8px 12px;
+    background: var(--bg-alt);
+    border-radius: var(--radius-sm);
+    margin-bottom: 6px;
+    font-size: 14px;
+}
+
+.ocr-section li strong {
+    color: var(--primary);
+}
+
+/* OCR Field Mapping Styles */
+.ocr-mapping-form {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.ocr-field-row {
+    display: flex;
+    gap: 16px;
+    padding: 12px;
+    margin-bottom: 8px;
+    background: var(--bg-alt);
+    border-radius: var(--radius-sm);
+    align-items: center;
+}
+
+.ocr-field-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.ocr-field-name {
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.ocr-field-value {
+    font-size: 14px;
+    color: var(--primary);
+    font-weight: 500;
+    word-break: break-word;
+}
+
+.ocr-field-context {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-style: italic;
+    margin-top: 4px;
+}
+
+.ocr-field-mapping {
+    flex-shrink: 0;
+}
+
+.ocr-field-mapping select {
+    min-width: 180px;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    font-size: 13px;
+}
+
+.confidence-badge {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    text-transform: uppercase;
+    font-weight: 600;
+}
+
+.confidence-badge.high {
+    background: rgba(16, 185, 129, 0.15);
+    color: var(--success);
+}
+
+.confidence-badge.medium {
+    background: rgba(245, 158, 11, 0.15);
+    color: var(--warning);
+}
+
+.confidence-badge.low {
+    background: rgba(107, 114, 128, 0.15);
+    color: var(--text-muted);
+}
+</style>
+
+<script>
+(function() {
+    const caseId = {{ case.id }};
+    let documents = [];
+    
+    // File type icons
+    const FILE_ICONS = {
+        'application/pdf': '📄',
+        'image/jpeg': '🖼️',
+        'image/png': '🖼️',
+        'image/gif': '🖼️',
+        'application/msword': '📝',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '📝',
+        'application/vnd.ms-excel': '📊',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '📊',
+        'text/plain': '📃',
+        'default': '📎'
+    };
+    
+    function getFileIcon(mimeType) {
+        return FILE_ICONS[mimeType] || FILE_ICONS['default'];
+    }
+    
+    function formatDate(dateStr) {
+        if (!dateStr) return '—';
+        const d = new Date(dateStr);
+        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+    
+    async function loadDocuments() {
+        const container = document.getElementById('documents-container');
+        
+        try {
+            const response = await fetch(`/api/v2/cases/${caseId}/documents`);
+            if (!response.ok) throw new Error('Failed to load documents');
+            
+            const data = await response.json();
+            documents = data.documents || [];
+            const stats = data.stats || {};
+            
+            // Update stats
+            document.getElementById('stat-total-docs').textContent = stats.total_count || 0;
+            document.getElementById('stat-total-size').textContent = stats.total_size_display || '0 B';
+            document.getElementById('stat-doc-types').textContent = stats.type_count || 0;
+            
+            if (documents.length === 0) {
+                container.innerHTML = `
+                    <div class="no-docs">
+                        <div class="no-docs-icon">📂</div>
+                        <p>No documents uploaded yet.</p>
+                        <p style="font-size: 13px;">Use the form above to upload your first document.</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            // Group documents by type
+            const grouped = {};
+            documents.forEach(doc => {
+                const type = doc.document_type;
+                if (!grouped[type]) grouped[type] = [];
+                grouped[type].push(doc);
+            });
+            
+            let html = '';
+            for (const [type, docs] of Object.entries(grouped)) {
+                const typeName = docs[0].document_type_display || type;
+                html += `
+                    <div class="doc-group">
+                        <div class="doc-group-header">
+                            <span>${typeName}</span>
+                            <span class="doc-group-count">${docs.length}</span>
+                        </div>
+                        <div class="doc-list">
+                            ${docs.map(doc => `
+                                <div class="doc-item" data-doc-id="${doc.id}">
+                                    <div class="doc-icon">${getFileIcon(doc.mime_type)}</div>
+                                    <div class="doc-info">
+                                        <div class="doc-filename" title="${doc.original_filename || doc.filename}">
+                                            ${doc.original_filename || doc.filename}
+                                        </div>
+                                        <div class="doc-meta">
+                                            <span>${doc.file_size_display}</span>
+                                            <span>${formatDate(doc.uploaded_at)}</span>
+                                            ${doc.description ? `<span title="${doc.description}">📝 ${doc.description.substring(0, 30)}${doc.description.length > 30 ? '...' : ''}</span>` : ''}
+                                        </div>
+                                    </div>
+                                    <span class="doc-version">v${doc.version}</span>
+                                    <div class="doc-actions">
+                                        <button class="btn-icon" onclick="runOCR(${doc.id}, '${doc.document_type}')" title="Extract Data (OCR)">
+                                            🔍
+                                        </button>
+                                        <button class="btn-icon" onclick="downloadDocument(${doc.id})" title="Download">
+                                            ⬇️
+                                        </button>
+                                        <button class="btn-icon" onclick="viewDocument(${doc.id})" title="View">
+                                            👁️
+                                        </button>
+                                        <button class="btn-icon delete" onclick="deleteDocument(${doc.id}, '${doc.filename}')" title="Delete">
+                                            🗑️
+                                        </button>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            container.innerHTML = html;
+            
+        } catch (error) {
+            console.error('Error loading documents:', error);
+            container.innerHTML = `
+                <div class="no-docs">
+                    <div class="no-docs-icon">⚠️</div>
+                    <p>Error loading documents</p>
+                    <p style="font-size: 13px;">${error.message}</p>
+                </div>
+            `;
+        }
+    }
+    
+    // Upload form handler
+    document.getElementById('doc-upload-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        const form = e.target;
+        const formData = new FormData(form);
+        const uploadBtn = document.getElementById('upload-btn');
+        const statusDiv = document.getElementById('upload-status');
+        
+        // Validate
+        if (!formData.get('file') || !formData.get('document_type')) {
+            statusDiv.textContent = 'Please select a file and document type';
+            statusDiv.className = 'upload-status error';
+            statusDiv.style.display = 'block';
+            return;
+        }
+        
+        // Show loading
+        uploadBtn.disabled = true;
+        uploadBtn.querySelector('.upload-text').style.display = 'none';
+        uploadBtn.querySelector('.upload-spinner').style.display = 'inline';
+        statusDiv.style.display = 'none';
+        
+        try {
+            const response = await fetch(`/api/v2/cases/${caseId}/documents`, {
+                method: 'POST',
+                body: formData
+            });
+            
+            const result = await response.json();
+            
+            if (result.status === 'success') {
+                statusDiv.textContent = '✅ Document uploaded successfully!';
+                statusDiv.className = 'upload-status success';
+                form.reset();
+                loadDocuments(); // Refresh list
+            } else if (result.status === 'duplicate') {
+                statusDiv.textContent = '⚠️ This file has already been uploaded';
+                statusDiv.className = 'upload-status duplicate';
+            } else {
+                statusDiv.textContent = '❌ ' + (result.message || 'Upload failed');
+                statusDiv.className = 'upload-status error';
+            }
+            
+        } catch (error) {
+            statusDiv.textContent = '❌ Error: ' + error.message;
+            statusDiv.className = 'upload-status error';
+        } finally {
+            uploadBtn.disabled = false;
+            uploadBtn.querySelector('.upload-text').style.display = 'inline';
+            uploadBtn.querySelector('.upload-spinner').style.display = 'none';
+            statusDiv.style.display = 'block';
+            
+            // Hide status after 5 seconds
+            setTimeout(() => {
+                statusDiv.style.display = 'none';
+            }, 5000);
+        }
+    });
+    
+    // Download document
+    window.downloadDocument = function(docId) {
+        window.location.href = `/api/v2/documents/${docId}/download`;
+    };
+    
+    // View document (open in new tab)
+    window.viewDocument = function(docId) {
+        window.open(`/api/v2/documents/${docId}/download`, '_blank');
+    };
+    
+    // Delete document
+    window.deleteDocument = async function(docId, filename) {
+        if (!confirm(`Delete "${filename}"?\n\nThis action cannot be undone.`)) {
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/v2/documents/${docId}`, {
+                method: 'DELETE'
+            });
+            
+            if (response.ok) {
+                loadDocuments(); // Refresh list
+            } else {
+                const result = await response.json();
+                alert('Failed to delete: ' + (result.detail || 'Unknown error'));
+            }
+        } catch (error) {
+            alert('Error deleting document: ' + error.message);
+        }
+    };
+    
+    // Run OCR on document
+    window.runOCR = async function(docId, docType) {
+        // Show loading modal
+        showOCRModal('loading', null);
+        
+        try {
+            const response = await fetch(`/api/v2/documents/${docId}/ocr`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ document_type: docType })
+            });
+            
+            const result = await response.json();
+            
+            if (response.ok && result.status === 'success') {
+                showOCRModal('success', result);
+            } else {
+                showOCRModal('error', { message: result.detail || result.message || 'OCR failed' });
+            }
+        } catch (error) {
+            showOCRModal('error', { message: error.message });
+        }
+    };
+    
+    // Show OCR results modal with field mapping
+    window.showOCRModal = function(status, data) {
+        // Remove existing modal
+        const existing = document.getElementById('ocr-modal');
+        if (existing) existing.remove();
+        
+        let content = '';
+        
+        if (status === 'loading') {
+            content = `
+                <div style="text-align: center; padding: 40px;">
+                    <div class="spinner" style="margin: 0 auto 16px;"></div>
+                    <p>Extracting data from document...</p>
+                    <p style="font-size: 12px; color: var(--text-muted);">This may take a moment for scanned documents.</p>
+                </div>
+            `;
+        } else if (status === 'error') {
+            content = `
+                <div style="text-align: center; padding: 40px;">
+                    <div style="font-size: 48px; margin-bottom: 16px;">❌</div>
+                    <p style="color: var(--danger);">OCR Extraction Failed</p>
+                    <p style="font-size: 13px; color: var(--text-muted);">${data.message}</p>
+                </div>
+            `;
+        } else if (status === 'success') {
+            const extracted = data.extracted_data || {};
+            const fields = extracted.fields || [];
+            const targetFields = data.target_fields || [];
+            const caseId = data.case_id;
+            
+            // Build target field dropdown options
+            let targetOptions = '<option value="">-- Do not save --</option>';
+            targetFields.forEach(tf => {
+                targetOptions += `<option value="${tf.value}">${tf.label}</option>`;
+            });
+            
+            if (fields.length > 0) {
+                let fieldsHtml = '<div class="ocr-mapping-form" id="ocr-mapping-form">';
+                fieldsHtml += '<p style="margin-bottom: 16px; color: var(--text-secondary);">Select which fields to save to the case:</p>';
+                
+                fields.forEach((field, idx) => {
+                    const confidenceClass = field.confidence === 'high' ? 'high' : 
+                                          field.confidence === 'medium' ? 'medium' : 'low';
+                    const defaultTarget = field.target_field || '';
+                    
+                    fieldsHtml += `
+                        <div class="ocr-field-row" data-idx="${idx}">
+                            <div class="ocr-field-info">
+                                <div class="ocr-field-name">
+                                    ${field.name}
+                                    <span class="confidence-badge ${confidenceClass}">${field.confidence || 'low'}</span>
+                                </div>
+                                <div class="ocr-field-value">${field.value}</div>
+                                ${field.context ? `<div class="ocr-field-context">"...${field.context.substring(0, 60)}..."</div>` : ''}
+                            </div>
+                            <div class="ocr-field-mapping">
+                                <select class="target-field-select" data-idx="${idx}" data-raw="${field.raw_value || field.value}">
+                                    ${targetOptions.replace(`value="${defaultTarget}"`, `value="${defaultTarget}" selected`)}
+                                </select>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                fieldsHtml += '</div>';
+                
+                content = `
+                    <div style="text-align: center; margin-bottom: 20px;">
+                        <div style="font-size: 36px; margin-bottom: 8px;">📋</div>
+                        <p style="font-weight: 600;">Found ${fields.length} Fields</p>
+                        <p style="font-size: 13px; color: var(--text-muted);">Map extracted data to case fields</p>
+                    </div>
+                    ${fieldsHtml}
+                    <input type="hidden" id="ocr-case-id" value="${caseId}">
+                `;
+            } else {
+                // No fields extracted, show text preview
+                const fullText = extracted.full_text || '';
+                if (fullText) {
+                    const preview = fullText.substring(0, 800) + (fullText.length > 800 ? '...' : '');
+                    content = `
+                        <div style="text-align: center; margin-bottom: 20px;">
+                            <div style="font-size: 36px; margin-bottom: 8px;">📄</div>
+                            <p style="font-weight: 600;">Text Extracted</p>
+                            <p style="font-size: 13px; color: var(--text-muted);">No structured fields recognized</p>
+                        </div>
+                        <div class="ocr-section">
+                            <h4>Extracted Text Preview</h4>
+                            <pre style="max-height: 300px; overflow-y: auto; background: var(--bg-alt); padding: 12px; border-radius: 6px; font-size: 11px; white-space: pre-wrap;">${preview}</pre>
+                        </div>
+                    `;
+                } else {
+                    content = '<p style="text-align: center; color: var(--text-muted); padding: 40px;">No data could be extracted from this document.</p>';
+                }
+            }
+        }
+        
+        const hasFields = status === 'success' && data?.extracted_data?.fields?.length > 0;
+        
+        const modal = document.createElement('div');
+        modal.id = 'ocr-modal';
+        modal.innerHTML = `
+            <div class="ocr-modal-backdrop" onclick="closeOCRModal()"></div>
+            <div class="ocr-modal-content">
+                <div class="ocr-modal-header">
+                    <h3>🔍 Document OCR</h3>
+                    <button onclick="closeOCRModal()" style="background: none; border: none; font-size: 20px; cursor: pointer;">✕</button>
+                </div>
+                <div class="ocr-modal-body">
+                    ${content}
+                </div>
+                <div class="ocr-modal-footer">
+                    ${hasFields ? '<button class="btn btn-primary" onclick="saveOCRMappings()">💾 Save Selected Fields</button>' : ''}
+                    <button class="btn btn-secondary" onclick="closeOCRModal()">Close</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+    };
+    
+    // Save OCR field mappings
+    window.saveOCRMappings = async function() {
+        const caseId = document.getElementById('ocr-case-id')?.value;
+        if (!caseId) {
+            alert('No case ID found');
+            return;
+        }
+        
+        const mappings = [];
+        document.querySelectorAll('.target-field-select').forEach(select => {
+            if (select.value) {
+                const idx = select.dataset.idx;
+                const row = document.querySelector(`.ocr-field-row[data-idx="${idx}"]`);
+                const valueEl = row?.querySelector('.ocr-field-value');
+                
+                mappings.push({
+                    target_field: select.value,
+                    value: valueEl?.textContent || '',
+                    raw_value: select.dataset.raw || ''
+                });
+            }
+        });
+        
+        if (mappings.length === 0) {
+            alert('No fields selected to save');
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/v2/cases/${caseId}/ocr-mapping`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mappings })
+            });
+            
+            const result = await response.json();
+            
+            if (response.ok && result.status === 'success') {
+                alert(`✅ Saved ${result.total_saved} field(s) to case`);
+                closeOCRModal();
+                // Reload page to show updated data
+                window.location.reload();
+            } else {
+                alert('Failed to save: ' + (result.detail || result.message || 'Unknown error'));
+            }
+        } catch (error) {
+            alert('Error saving fields: ' + error.message);
+        }
+    };
+    
+    window.closeOCRModal = function() {
+        const modal = document.getElementById('ocr-modal');
+        if (modal) modal.remove();
+    };
+    
+    // Load documents on page ready
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', loadDocuments);
+    } else {
+        loadDocuments();
+    }
+    
+    // Make loadDocuments available globally for refresh
+    window.refreshDocuments = loadDocuments;
+})();
+</script>

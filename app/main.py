@@ -1,8 +1,5 @@
 from __future__ import annotations
-from datetime import datetime
-from app.config import settings
-from app.services.auth_service import get_current_user
-from app.auth_routes import router as auth_router, get_current_user, require_auth
+
 # ---- Windows event loop fix for asyncio subprocess ----
 import sys as _sys
 import asyncio as _asyncio
@@ -11,23 +8,61 @@ if _sys.platform == "win32":
         _asyncio.set_event_loop_policy(_asyncio.WindowsProactorEventLoopPolicy())
     except Exception:
         pass
+# =====================================================
+# V2.0 ROUTE ADDITIONS FOR main.py
+# Copy these routes into your main.py file
+# =====================================================
 
+# -----------------------------------------------------
+# ADD THESE IMPORTS AT THE TOP OF main.py
+# -----------------------------------------------------
+
+from fastapi.responses import StreamingResponse
+import asyncio
+
+# Import V2 services
+from app.services.notification_service import (
+    get_user_notifications,
+    get_unread_count,
+    mark_as_read,
+    mark_all_as_read,
+    delete_notification,
+    create_notification,
+    add_listener,
+    remove_listener,
+)
+from app.services.deal_analysis_service import (
+    analyze_deal,
+    bulk_analyze_cases,
+)
+
+# Document Management Service
+try:
+    from app.services.document_manager_service import (
+        DocumentManager, DocumentType, get_document_manager
+    )
+    DOCUMENT_MANAGER_AVAILABLE = True
+except ImportError:
+    DOCUMENT_MANAGER_AVAILABLE = False
 # ---------------- Stdlib ----------------
-import logging
 import asyncio
 import csv as _csv
 import datetime as _dt
+import io
+import json
+import logging
 import os
+import re
 import sys
 import tempfile
 import uuid
-import io, json
 import zipfile
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 from urllib.parse import quote_plus
-import re
-from tools.import_pasco_csv import main as import_pasco_csv_main
+
+# ---------------- Third Party ----------------
 import requests  # for BatchData skip trace calls
 
 # ---------------- FastAPI / Responses ----------------
@@ -40,12 +75,11 @@ from fastapi import (
     Form,
     Query,
     HTTPException,
+    Body,
 )
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi import Request
-from fastapi.responses import RedirectResponse
 
 # ---------------- DB / ORM ----------------
 from sqlalchemy.orm import Session
@@ -53,12 +87,17 @@ from sqlalchemy import inspect, text, bindparam, func
 from sqlalchemy.exc import OperationalError
 
 # ---------------- App imports ----------------
+from app.config import settings
+from app.auth_routes import router as auth_router, require_auth
+from app.services.auth_service import get_current_user
 from app.services.progress_bus import progress_bus
-#from app.settings import settings
-from .database import Base, engine, SessionLocal
-from .models import Case, Defendant, Docket, Note
-from .utils import ensure_case_folder, compute_offer_70, compute_offer_80
-from .schemas import OutstandingLien, OutstandingLiensUpdate
+from app.services.report_service import (
+    generate_case_report,
+    build_case_report_bytes,
+    _is_short_sale,
+    _report_filename
+)
+from app.services.update_cases_service import run_update_cases_job, LAST_UPDATE_STATUS
 from app.services.skiptrace_service import (
     get_case_address_components,
     batchdata_skip_trace,
@@ -69,10 +108,14 @@ from app.services.skiptrace_service import (
     load_skiptrace_for_case,
     normalize_property_payload,
 )
+from app.api.v2_endpoints import router as v2_router
+from tools.import_pasco_csv import main as import_pasco_csv_main
 
-from app.services.report_service import generate_case_report, build_case_report_bytes, _is_short_sale, _report_filename
-from app.services.update_cases_service import run_update_cases_job
-from app.services.update_cases_service import LAST_UPDATE_STATUS
+from .database import Base, engine, SessionLocal
+from .models import Case, Defendant, Docket, Note
+from .utils import ensure_case_folder, compute_offer_70, compute_offer_80
+from .schemas import OutstandingLien, OutstandingLiensUpdate
+from app.services.progress_bus import shutdown_progress_bus
 # ========================================
 # PROPERTY DATA PARSER
 # ========================================
@@ -284,6 +327,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent  # e.g. C:\pascowebapp
 app = FastAPI(title="JSN Holdings Foreclosure Manager")
 # Include authentication routes
 app.include_router(auth_router)
+# Include v2 API routes
+app.include_router(v2_router)
 
 # Rest of your app setup continues...
 logger = logging.getLogger("pascowebapp")
@@ -328,7 +373,7 @@ def streetview_url(address: str) -> str:
     if not address:
         return ""
     address_q = quote_plus(address)
-    key = settings.GOOGLE_MAPS_API_KEY
+    key = settings.google_maps_api_key
     if key:
         base = "https://maps.googleapis.com/maps/api/streetview"
         return f"{base}?size=600x360&location={address_q}&key={key}"
@@ -2491,16 +2536,19 @@ def get_outstanding_liens(case_id: int, db: Session = Depends(get_db)):
     return case.get_outstanding_liens()
 
 
-@app.post("/cases/{case_id}/liens", response_model=list[OutstandingLien])
+@app.post("/cases/{case_id}/liens")
 def save_outstanding_liens(case_id: int, payload: OutstandingLiensUpdate, db: Session = Depends(get_db)):
-    case = db.query(Case).get(case_id)  # type: ignore[call-arg]
+    case = db.query(Case).filter(Case.id == case_id).first()
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
-    case.set_outstanding_liens([l.dict() for l in payload.outstanding_liens])
-    db.add(case)
+    
+    # Convert liens to JSON string and save to outstanding_liens column
+    import json
+    case.outstanding_liens = json.dumps([l.dict() for l in payload.outstanding_liens])
     db.commit()
-    db.refresh(case)
-    return case.get_outstanding_liens()
+    
+    # Return the saved liens
+    return json.loads(case.outstanding_liens)
 
 
 # ======================================================================
@@ -2539,16 +2587,42 @@ def _ensure_archived_column():
 def cases_list(
     request: Request,
     page: int = Query(1),
-    page_size: int = Query(10, ge=5, le=100),
-    show_archived: int = Query(0),
+    page_size: Optional[int] = Query(None),
+    show_archived: Optional[str] = Query("0"),
+    show_new: Optional[str] = Query("0"),
     case: str = Query("", alias="case"),
     tag: str = Query(""),
+    sort_by: str = Query("case_number"),
+    sort_order: str = Query("desc"),
     db: Session = Depends(get_db),
 ):
+    # Handle page_size - default to 10, cap at 100
+    if page_size is None or page_size < 5:
+        page_size = 10
+    if page_size > 100:
+        page_size = 100
+    
+    # Handle show_archived - convert empty string to 0
+    try:
+        show_archived_int = int(show_archived) if show_archived else 0
+    except (ValueError, TypeError):
+        show_archived_int = 0
+    
+    # Handle show_new - convert empty string to 0
+    try:
+        show_new_int = int(show_new) if show_new else 0
+    except (ValueError, TypeError):
+        show_new_int = 0
+    
     qry = db.query(Case)
 
-    if not show_archived:
+    if not show_archived_int:
         qry = qry.filter(text("(archived IS NULL OR archived = 0)"))
+
+    # Show new: filter to cases without an address
+    if show_new_int:
+        qry = qry.filter(text("(address IS NULL OR address = '' OR TRIM(address) = '')"))
+        qry = qry.filter(text("(address_override IS NULL OR address_override = '' OR TRIM(address_override) = '')"))
 
     if case:
         qry = qry.filter(Case.address.contains(case))
@@ -2636,15 +2710,28 @@ def cases_list(
         else:
             qry = qry.filter(text("1=0"))
     # page_size comes from query param (default 10)
-    # Deterministic ordering: newest first
-    qry = qry.order_by(Case.id.desc())
+    # Dynamic ordering based on sort_by and sort_order
+    sort_column = Case.case_number  # Default
+    if sort_by == "case_number":
+        sort_column = Case.case_number
+    elif sort_by == "filing_datetime":
+        sort_column = Case.filing_datetime
+    elif sort_by == "style":
+        sort_column = Case.style
+    elif sort_by == "address":
+        sort_column = Case.address
+    else:
+        sort_column = Case.case_number
+    
+    if sort_order == "asc":
+        qry = qry.order_by(sort_column.asc())
+    else:
+        qry = qry.order_by(sort_column.desc())
 
     total = qry.count()
     pages = (total + page_size - 1) // page_size
     offset = (page - 1) * page_size
 
-    # ✅ NEWEST → OLDEST by case_id (Case.id)
-    qry = qry.order_by(Case.id.desc())
     cases = qry.offset(offset).limit(page_size).all()
     pagination = {"page": page, "pages": pages, "total": total}
 
@@ -2794,11 +2881,14 @@ def cases_list(
             "request": request,
             "cases": cases,   # ✅ now defined
             "pagination": pagination,
-            "show_archived": bool(show_archived),
+            "show_archived": bool(show_archived_int),
+            "show_new": bool(show_new_int),
             "search_query": case,
             "tag_filter": tag,
             "tag_options": list(tag_map.keys()),
             "page_size": page_size,
+            "sort_by": sort_by,
+            "sort_order": sort_order,
             "defendants_count": defendants_count,
             "notes_count": notes_count,
             "docs_present": docs_present,
@@ -3569,10 +3659,26 @@ async def update_property_demographics(
     
     return RedirectResponse(url=f"/cases/{case_id}", status_code=303)
 @app.get("/debug/owners/{case_id}")
-def debug_owners(case_id: int):
-    """Debug owner data structure"""
+async def debug_owners(
+    case_id: int,
+    user: "User" = Depends(get_current_user)
+):
+    """
+    Debug owner data structure - ADMIN ONLY
+    
+    Security: This endpoint exposes sensitive property owner data
+    and should only be accessible to administrators for debugging.
+    """
     from app.services.skiptrace_service import load_property_for_case
+    from app.auth import User
     import json
+    
+    # Require admin access
+    if not user.is_admin:
+        raise HTTPException(
+            status_code=403, 
+            detail="Admin access required for debug endpoints"
+        )
     
     property_payload = load_property_for_case(case_id)
     
@@ -3602,7 +3708,784 @@ def debug_owners(case_id: int):
         "step8_parsed_owners": parsed.get("owners") if parsed else None,
         "step9_full_parsed_data": parsed,
     }
+@app.on_event("shutdown")
+async def shutdown():
+    await shutdown_progress_bus()
 # =====================
 # Manual Add Case (v1.08)
 # =====================
 # (placeholder for future additions)
+
+# ==========================================
+# V2.0 ANALYTICS DASHBOARD ROUTE
+# ==========================================
+
+@app.get("/analytics", response_class=HTMLResponse)
+def analytics_dashboard(request: Request, db: Session = Depends(get_db)):
+    """V2.0 Enhanced Analytics Dashboard"""
+    user = get_current_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=302)
+    
+    # Import analytics service
+    from app.services.analytics_service import (
+        get_dashboard_metrics,
+        get_conversion_funnel,
+        get_roi_analysis,
+        get_top_opportunities
+    )
+    
+    # Gather metrics
+    metrics = get_dashboard_metrics()
+    funnel = get_conversion_funnel()
+    roi = get_roi_analysis()
+    opportunities = get_top_opportunities(limit=10)
+    
+    return templates.TemplateResponse("analytics_dashboard.html", {
+        "request": request,
+        "user": user,
+        "metrics": metrics,
+        "funnel": funnel,
+        "roi": roi,
+        "opportunities": opportunities,
+    })
+
+
+# ==========================================
+# V2.0 NOTIFICATIONS API
+# ==========================================
+
+@app.get("/api/v2/notifications")
+def api_get_notifications(
+    request: Request,
+    unread_only: bool = False,
+    limit: int = 50,
+    db: Session = Depends(get_db)
+):
+    """Get user's notifications"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    notifications = get_user_notifications(
+        user_id=user.id,
+        unread_only=unread_only,
+        limit=limit
+    )
+    
+    unread_count = get_unread_count(user.id)
+    
+    return {
+        "notifications": notifications,
+        "unread_count": unread_count,
+        "total": len(notifications),
+    }
+
+
+@app.post("/api/v2/notifications/{notification_id}/read")
+def api_mark_notification_read(
+    notification_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Mark a notification as read"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    success = mark_as_read(notification_id)
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    
+    return {"success": True}
+
+
+@app.post("/api/v2/notifications/mark-all-read")
+def api_mark_all_read(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Mark all notifications as read"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    count = mark_all_as_read(user.id)
+    
+    return {"success": True, "count": count}
+
+
+@app.delete("/api/v2/notifications/{notification_id}")
+def api_delete_notification(
+    notification_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Delete a notification"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    success = delete_notification(notification_id)
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    
+    return {"success": True}
+
+
+@app.get("/api/v2/notifications/stream")
+async def notification_stream(request: Request, db: Session = Depends(get_db)):
+    """Server-Sent Events stream for real-time notifications"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    user_id = user.id
+    
+    async def event_generator():
+        queue = asyncio.Queue()
+        add_listener(user_id, queue)
+        
+        try:
+            # Send initial connection message
+            yield f"data: {{\"type\": \"connected\", \"user_id\": {user_id}}}\n\n"
+            
+            while True:
+                try:
+                    # Wait for notification or timeout (heartbeat)
+                    notification = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    import json
+                    yield f"data: {json.dumps(notification)}\n\n"
+                except asyncio.TimeoutError:
+                    # Send heartbeat
+                    yield f"data: {{\"type\": \"heartbeat\"}}\n\n"
+        finally:
+            remove_listener(user_id, queue)
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        }
+    )
+
+
+@app.post("/api/v2/notifications/test")
+def api_create_test_notification(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Create a test notification (for development)"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    notification = create_notification(
+        user_id=user.id,
+        title="Test Notification",
+        message="This is a test notification from the API",
+        notification_type="info",
+        link="/cases"
+    )
+    
+    return {"success": True, "notification": notification}
+
+
+# ==========================================
+# V2.0 DEAL ANALYSIS API
+# ==========================================
+
+@app.post("/api/v2/cases/{case_id}/analyze")
+def api_analyze_case(
+    case_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Analyze a specific case and return score + metrics"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    analysis = analyze_deal(case_id, db)
+    
+    if "error" in analysis:
+        raise HTTPException(status_code=404, detail=analysis["error"])
+    
+    return analysis
+
+
+@app.post("/api/v2/cases/bulk-analyze")
+def api_bulk_analyze(
+    request: Request,
+    limit: int = None,
+    db: Session = Depends(get_db)
+):
+    """Analyze multiple cases"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    results = bulk_analyze_cases(limit=limit, db=db)
+    
+    return {
+        "total_analyzed": len(results),
+        "results": results,
+    }
+
+
+@app.get("/api/v2/cases/top-deals")
+def api_get_top_deals(
+    request: Request,
+    limit: int = 10,
+    min_score: int = 0,
+    db: Session = Depends(get_db)
+):
+    """Get top-scoring deals with case details"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    # Get all active cases with ARV set
+    cases = db.query(Case).filter(
+        text("(archived IS NULL OR archived = 0)"),
+        Case.arv.isnot(None),
+        Case.arv > 0
+    ).all()
+    
+    top_deals = []
+    for case in cases:
+        # Calculate deal score inline
+        arv = float(case.arv or 0)
+        rehab = float(case.rehab or 0)
+        closing_costs = float(case.closing_costs or 0)
+        
+        # Parse liens
+        total_liens = 0.0
+        try:
+            liens_data = json.loads(case.outstanding_liens) if case.outstanding_liens else []
+            if isinstance(liens_data, list):
+                for lien in liens_data:
+                    if isinstance(lien, dict):
+                        amt = lien.get("amount", "0")
+                        amt_str = str(amt).replace("$", "").replace(",", "")
+                        total_liens += float(amt_str) if amt_str else 0
+        except:
+            pass
+        
+        if arv <= 0:
+            continue
+            
+        # Calculate metrics (70% rule)
+        max_offer = (arv * 0.70) - rehab - closing_costs
+        estimated_profit = arv - max_offer - rehab - closing_costs - total_liens
+        equity_pct = ((arv - total_liens) / arv * 100) if arv > 0 else 0
+        roi_pct = (estimated_profit / max_offer * 100) if max_offer > 0 else 0
+        
+        # Calculate score
+        score = 50  # Base
+        if equity_pct >= 40:
+            score += 25
+        elif equity_pct >= 30:
+            score += 15
+        elif equity_pct >= 20:
+            score += 5
+        
+        if roi_pct >= 30:
+            score += 25
+        elif roi_pct >= 20:
+            score += 15
+        elif roi_pct >= 10:
+            score += 5
+        
+        if estimated_profit >= 50000:
+            score += 10
+        elif estimated_profit >= 25000:
+            score += 5
+        
+        if total_liens > 0 and total_liens > max_offer:
+            score -= 20  # Short sale penalty
+        
+        score = max(0, min(100, score))
+        
+        if score >= min_score:
+            top_deals.append({
+                "id": case.id,
+                "case_id": case.id,
+                "case_number": case.case_number or "",
+                "address": case.address_override or case.address or "",
+                "score": score,
+                "arv": arv,
+                "estimated_profit": round(estimated_profit, 2),
+                "max_offer": round(max_offer, 2),
+                "total_liens": total_liens,
+                "rehab": rehab,
+                "closing_costs": closing_costs,
+            })
+    
+    # Sort by score descending
+    top_deals.sort(key=lambda x: x["score"], reverse=True)
+    
+    return {
+        "total_deals": len(top_deals),
+        "top_deals": top_deals[:limit],
+        "min_score": min_score,
+    }
+
+
+@app.get("/api/v2/analytics/deal-distribution")
+def api_deal_distribution(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Get distribution of deal scores"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    results = bulk_analyze_cases(db=db)
+    
+    # Group by score ranges
+    distribution = {
+        "excellent": 0,  # 80-100
+        "good": 0,       # 60-79
+        "fair": 0,       # 40-59
+        "poor": 0,       # 0-39
+    }
+    
+    for result in results:
+        score = result["score"]
+        if score >= 80:
+            distribution["excellent"] += 1
+        elif score >= 60:
+            distribution["good"] += 1
+        elif score >= 40:
+            distribution["fair"] += 1
+        else:
+            distribution["poor"] += 1
+    
+    return {
+        "distribution": distribution,
+        "total_analyzed": len(results),
+    }
+
+
+# ============================================================
+# DOCUMENT MANAGEMENT API ENDPOINTS
+# ============================================================
+
+@app.get("/api/v2/cases/{case_id}/documents")
+def api_get_case_documents(
+    case_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Get all documents for a case"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    if not DOCUMENT_MANAGER_AVAILABLE:
+        raise HTTPException(status_code=501, detail="Document manager not available")
+    
+    # Verify case exists
+    case = db.query(Case).filter(Case.id == case_id).first()
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+    
+    doc_manager = get_document_manager(db, str(UPLOAD_ROOT))
+    documents = doc_manager.get_documents_for_case(case_id)
+    stats = doc_manager.get_document_stats(case_id)
+    
+    return {
+        "case_id": case_id,
+        "documents": documents,
+        "stats": stats,
+        "document_types": [
+            {"value": dt.value, "label": DocumentType.display_name(dt)}
+            for dt in DocumentType
+        ]
+    }
+
+
+@app.post("/api/v2/cases/{case_id}/documents")
+async def api_upload_document(
+    case_id: int,
+    request: Request,
+    file: UploadFile = File(...),
+    document_type: str = Form(...),
+    description: str = Form(None),
+    db: Session = Depends(get_db)
+):
+    """Upload a new document"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    if not DOCUMENT_MANAGER_AVAILABLE:
+        raise HTTPException(status_code=501, detail="Document manager not available")
+    
+    # Verify case exists
+    case = db.query(Case).filter(Case.id == case_id).first()
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+    
+    # Validate document type
+    try:
+        doc_type = DocumentType(document_type)
+    except ValueError:
+        doc_type = DocumentType.OTHER
+    
+    # Read file content
+    content = await file.read()
+    if len(content) == 0:
+        raise HTTPException(status_code=400, detail="Empty file")
+    
+    # Max file size: 50MB
+    if len(content) > 50 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large (max 50MB)")
+    
+    doc_manager = get_document_manager(db, str(UPLOAD_ROOT))
+    result = doc_manager.upload_document(
+        case_id=case_id,
+        filename=file.filename,
+        content=content,
+        doc_type=doc_type,
+        mime_type=file.content_type or "application/octet-stream",
+        user_id=user.id if hasattr(user, 'id') else None,
+        description=description
+    )
+    
+    if result["status"] == "error":
+        raise HTTPException(status_code=500, detail=result["message"])
+    
+    return result
+
+
+@app.get("/api/v2/documents/{doc_id}")
+def api_get_document(
+    doc_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Get single document details"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    if not DOCUMENT_MANAGER_AVAILABLE:
+        raise HTTPException(status_code=501, detail="Document manager not available")
+    
+    doc_manager = get_document_manager(db, str(UPLOAD_ROOT))
+    document = doc_manager.get_document_by_id(doc_id)
+    
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    return document
+
+
+@app.get("/api/v2/documents/{doc_id}/download")
+def api_download_document(
+    doc_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Download document file"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    if not DOCUMENT_MANAGER_AVAILABLE:
+        raise HTTPException(status_code=501, detail="Document manager not available")
+    
+    doc_manager = get_document_manager(db, str(UPLOAD_ROOT))
+    document = doc_manager.get_document_by_id(doc_id)
+    
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    file_path = Path(UPLOAD_ROOT) / document["file_path"]
+    
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found on disk")
+    
+    return FileResponse(
+        path=str(file_path),
+        filename=document["original_filename"] or document["filename"],
+        media_type=document["mime_type"] or "application/octet-stream"
+    )
+
+
+@app.delete("/api/v2/documents/{doc_id}")
+def api_delete_document(
+    doc_id: int,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Soft delete a document"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    if not DOCUMENT_MANAGER_AVAILABLE:
+        raise HTTPException(status_code=501, detail="Document manager not available")
+    
+    doc_manager = get_document_manager(db, str(UPLOAD_ROOT))
+    document = doc_manager.get_document_by_id(doc_id)
+    
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    success = doc_manager.soft_delete_document(doc_id)
+    
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to delete document")
+    
+    return {"status": "success", "message": "Document deleted"}
+
+
+@app.get("/api/v2/cases/{case_id}/documents/history/{doc_type}")
+def api_get_document_history(
+    case_id: int,
+    doc_type: str,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Get version history for a document type"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    if not DOCUMENT_MANAGER_AVAILABLE:
+        raise HTTPException(status_code=501, detail="Document manager not available")
+    
+    try:
+        document_type = DocumentType(doc_type)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid document type")
+    
+    doc_manager = get_document_manager(db, str(UPLOAD_ROOT))
+    history = doc_manager.get_document_history(case_id, document_type)
+    
+    return {
+        "case_id": case_id,
+        "document_type": doc_type,
+        "versions": history
+    }
+
+
+@app.post("/api/v2/documents/{doc_id}/ocr")
+def api_run_document_ocr(
+    doc_id: int,
+    request: Request,
+    body: dict = Body(default={}),
+    db: Session = Depends(get_db)
+):
+    """Run OCR on a document and extract structured data with field mapping"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    if not DOCUMENT_MANAGER_AVAILABLE:
+        raise HTTPException(status_code=501, detail="Document manager not available")
+    
+    # Get document
+    doc_manager = get_document_manager(db, str(UPLOAD_ROOT))
+    document = doc_manager.get_document_by_id(doc_id)
+    
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Get file path
+    file_path = Path(UPLOAD_ROOT) / document["file_path"]
+    
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found on disk")
+    
+    # Check if it's a PDF
+    mime_type = document.get("mime_type", "")
+    if mime_type != "application/pdf" and not str(file_path).lower().endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="OCR only supports PDF files")
+    
+    # Get document type from request or document
+    doc_type = body.get("document_type") or document.get("document_type") or "other"
+    
+    # Run enhanced OCR
+    try:
+        # Try enhanced service first
+        try:
+            from app.services.ocr_service_enhanced import (
+                extract_document_data_enhanced, 
+                get_target_field_options
+            )
+            extracted_data = extract_document_data_enhanced(str(file_path), doc_type)
+            target_fields = get_target_field_options()
+        except ImportError:
+            # Fall back to original service
+            from app.services.ocr_service import extract_document_data
+            extracted_data = extract_document_data(str(file_path), doc_type)
+            target_fields = []
+        
+        return {
+            "status": "success",
+            "document_id": doc_id,
+            "case_id": document.get("case_id"),
+            "document_type": doc_type,
+            "extracted_data": extracted_data,
+            "target_fields": target_fields,
+        }
+        
+    except ImportError:
+        raise HTTPException(status_code=501, detail="OCR service not available. Install PyPDF2.")
+    except Exception as e:
+        logger.error(f"OCR failed for document {doc_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"OCR failed: {str(e)}")
+
+
+@app.post("/api/v2/cases/{case_id}/ocr-mapping")
+def api_save_ocr_mapping(
+    case_id: int,
+    request: Request,
+    body: dict = Body(...),
+    db: Session = Depends(get_db)
+):
+    """Save mapped OCR fields to case"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    # Get case
+    case = db.query(Case).filter(Case.id == case_id).first()
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+    
+    mappings = body.get("mappings", [])
+    saved_fields = []
+    
+    # Get current liens
+    try:
+        current_liens = json.loads(case.outstanding_liens or "[]")
+    except:
+        current_liens = []
+    
+    # Get current property overrides
+    try:
+        property_overrides = json.loads(case.property_overrides or "{}")
+    except:
+        property_overrides = {}
+    
+    # Track if we're adding a new lien
+    new_lien = {}
+    
+    for mapping in mappings:
+        field_name = mapping.get("target_field")
+        value = mapping.get("value")
+        raw_value = mapping.get("raw_value", value)
+        
+        if not field_name or value is None:
+            continue
+        
+        try:
+            # Direct case fields
+            if field_name == "case_number" and not case.case_number:
+                case.case_number = str(value)
+                saved_fields.append({"field": "case_number", "value": value})
+                
+            elif field_name == "address":
+                case.address_override = str(value)
+                saved_fields.append({"field": "address_override", "value": value})
+                
+            elif field_name == "parcel_id" and not case.parcel_id:
+                case.parcel_id = str(value)
+                saved_fields.append({"field": "parcel_id", "value": value})
+                
+            elif field_name == "filing_datetime" and not case.filing_datetime:
+                case.filing_datetime = str(value)
+                saved_fields.append({"field": "filing_datetime", "value": value})
+                
+            elif field_name == "arv":
+                case.arv = float(raw_value) if raw_value else 0
+                saved_fields.append({"field": "arv", "value": case.arv})
+                
+            elif field_name == "rehab":
+                case.rehab = float(raw_value) if raw_value else 0
+                saved_fields.append({"field": "rehab", "value": case.rehab})
+                
+            elif field_name == "closing_costs":
+                case.closing_costs = float(raw_value) if raw_value else 0
+                saved_fields.append({"field": "closing_costs", "value": case.closing_costs})
+            
+            # Lien fields (aggregate into new_lien dict)
+            elif field_name == "lien_holder":
+                new_lien["holder"] = str(value)
+                
+            elif field_name == "lien_amount":
+                new_lien["amount"] = str(raw_value) if raw_value else str(value)
+                
+            elif field_name == "lien_type":
+                new_lien["type"] = str(value)
+                
+            elif field_name == "lien_date":
+                new_lien["date"] = str(value)
+            
+            # Mortgage/property override fields
+            elif field_name in ["mortgage_lender", "mortgage_borrower", "mortgage_amount", 
+                               "mortgage_rate", "mortgage_date"]:
+                if "mortgage_history" not in property_overrides:
+                    property_overrides["mortgage_history"] = []
+                
+                # Add to first mortgage entry or create new
+                if not property_overrides["mortgage_history"]:
+                    property_overrides["mortgage_history"].append({})
+                
+                key = field_name.replace("mortgage_", "")
+                if key == "amount":
+                    property_overrides["mortgage_history"][0][key] = raw_value
+                else:
+                    property_overrides["mortgage_history"][0][key] = str(value)
+                
+                saved_fields.append({"field": field_name, "value": value})
+            
+            # Defendant (add to defendants table)
+            elif field_name == "defendant":
+                from app.models import Defendant
+                # Check if defendant already exists
+                existing = db.query(Defendant).filter(
+                    Defendant.case_id == case_id,
+                    Defendant.name == str(value)
+                ).first()
+                
+                if not existing:
+                    new_defendant = Defendant(case_id=case_id, name=str(value))
+                    db.add(new_defendant)
+                    saved_fields.append({"field": "defendant", "value": value})
+        
+        except Exception as e:
+            logger.error(f"Error mapping field {field_name}: {e}")
+    
+    # Save new lien if we have holder or amount
+    if new_lien.get("holder") or new_lien.get("amount"):
+        if "holder" not in new_lien:
+            new_lien["holder"] = "Unknown"
+        if "amount" not in new_lien:
+            new_lien["amount"] = "0"
+        current_liens.append(new_lien)
+        case.outstanding_liens = json.dumps(current_liens)
+        saved_fields.append({"field": "outstanding_liens", "value": new_lien})
+    
+    # Save property overrides
+    if property_overrides:
+        case.property_overrides = json.dumps(property_overrides)
+    
+    db.commit()
+    
+    return {
+        "status": "success",
+        "case_id": case_id,
+        "saved_fields": saved_fields,
+        "total_saved": len(saved_fields)
+    }

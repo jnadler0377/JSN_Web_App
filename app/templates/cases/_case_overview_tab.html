@@ -1,335 +1,232 @@
-{# app/templates/cases/_case_overview_tab.html #}
-{# NO wrapper div - that's in case_detail.html already! #}
+{# app/templates/cases/_case_overview_tab.html - Updated for V3 Design #}
 
-<!-- Two-column wrapper ONLY for address/photo (left) and Outstanding Liens (right) -->
-<div class="addr-photo-liens">
-  <div class="left-col">
-    <p class="address-line"><strong>Address:</strong> {{ (case.address_override or case.address)|title }}</p>
-    <a href="#" onclick="toggleAddressEdit(true); return false;">edit</a>
-    <div id="addressEdit" style="display:none; margin-top:0.5rem;">
-      <form method="post" action="/cases/{{ case.id }}/update">
-        <input type="text" name="address_override" placeholder="Address" value="{{ (case.address_override or case.address)|title }}">
-        <button class="btn" type="submit">Save</button>
-        <button class="btn" type="button" onclick="toggleAddressEdit(false)">Cancel</button>
-      </form>
-    </div>
-
-    <p class="property-inline">
-      <strong>Parcel ID:</strong> {{ case.parcel_id or '—' }}
-      &nbsp;|&nbsp;
-      <strong>Filing Date:</strong> {{ case.filing_datetime or '—' }}
-      <a href="#" onclick="toggleParcelEdit(true); return false;" class="inline-edit-link">edit</a>
-    </p>
-    <div id="parcelEdit" style="display:none; margin-top:0.5rem;">
-      <form method="post" action="/cases/{{ case.id }}/update">
-        <input type="text" name="parcel_id" placeholder="Parcel ID" value="{{ case.parcel_id or '' }}">
-        <button class="btn" type="submit">Save</button>
-        <button class="btn" type="button" onclick="toggleParcelEdit(false)">Cancel</button>
-      </form>
-    </div>
-
-    {# Street View: prefer override, fallback to original address #}
-    {% set sv_addr = case.address_override or case.address %}
-
-    <div class="streetview-container">
-      {% if sv_addr and streetview_url and streetview_url(sv_addr) %}
-        <img
-          src="{{ streetview_url(sv_addr) }}"
-          alt="Street View"
-          class="streetview-img"
-          onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"
-        >
-        <div class="streetview-placeholder" style="display:none;">
-          Street View unavailable. <a href="https://www.google.com/maps?q={{ sv_addr|urlencode }}&layer=c" target="_blank">Open in Google Maps</a>
-        </div>
-      {% else %}
-        <div class="streetview-placeholder">
-          Street View unavailable. <a href="https://www.google.com/maps?q={{ sv_addr|urlencode }}&layer=c" target="_blank">Open in Google Maps</a>
-        </div>
-      {% endif %}
-    </div>
-  </div>
-
-  <div class="right-col">
-    <div id="outstanding-liens" class="liens-panel">
-      <div class="liens-header-row">
-        <div class="liens-header">Outstanding Liens</div>
-        <a id="lien-modal-open" class="lien-link">Add Lien</a>
-      </div>
-      <div id="liens-list" class="liens-list"></div>
-      <div id="liens-saving" class="liens-saving" style="display:none;">Saving…</div>
-    </div>
-
-    <section class="numbers-section">
-      <h3>Value Calculation</h3>
-      <form method="post" action="/cases/{{ case.id }}/update">
-        <label>ARV</label>
-        <input type="number" step="0.01" name="arv" id="arv-input" value="{{ arv if arv else '' }}">
-        
-        <label>Condition</label>
-        {% set rc = rehab_condition or 'Good' %}
-        <div class="condition-group">
-          <label class="condition-option">
-            <input type="radio" name="rehab_condition" value="Poor" {% if rc == 'Poor' %}checked{% endif %}>
-            <span>Poor</span>
-          </label>
-          <label class="condition-option">
-            <input type="radio" name="rehab_condition" value="Fair" {% if rc == 'Fair' %}checked{% endif %}>
-            <span>Fair</span>
-          </label>
-          <label class="condition-option">
-            <input type="radio" name="rehab_condition" value="Good" {% if rc == 'Good' %}checked{% endif %}>
-            <span>Good</span>
-          </label>
-          <label class="condition-option">
-            <input type="radio" name="rehab_condition" value="Excellent" {% if rc == 'Excellent' %}checked{% endif %}>
-            <span>Excellent</span>
-          </label>
-        </div>
-        
-        <label>Rehab</label>
-        <input type="number" step="0.01" name="rehab" id="rehab-input"
-               data-year-built="{{ rehab_year_built or '' }}"
-               data-sqft="{{ rehab_sqft or '' }}"
-               value="{{ rehab if rehab and rehab > 0 else '' }}"
-               placeholder="{% if rehab_suggested %}Suggested: ${{ '{:,.0f}'.format(rehab_suggested) }}{% endif %}">
-        
-        <label>Closing Costs</label>
-        <input type="number" step="0.01" name="closing_costs" id="closing-costs-input"
-               value="{{ closing_input if closing_input else '' }}"
-               placeholder="{% if arv %}Suggested: ${{ '{:,.0f}'.format(arv * 0.045) }}{% endif %}">
-        
-        <p><strong>JSN Offer:</strong> 
-          {% if wholesale_offer > 0 %}
-            ${{ '{:,.0f}'.format(wholesale_offer) }} - ${{ '{:,.0f}'.format(flip_offer) }}
-          {% else %}
-            Set ARV to calculate
-          {% endif %}
-        </p>
-        
-        <button class="btn" type="submit">Save</button>
-      </form>
-    </section>
-  </div>
-</div>
-
-<section class="defendants-section">
-  <h3>Defendants</h3>
-  {% if defendants and defendants|length %}
-    <ul>
-      {% for d in defendants %}
-        {% set name = (d.name or '')|string %}
-        {% if name and name|lower != 'nan' %}
-          <li>{{ name }}</li>
-        {% endif %}
-      {% endfor %}
-    </ul>
-  {% else %}
-    <p>No defendants recorded.</p>
-  {% endif %}
-</section>
-
-<section class="skip-trace-section">
-  <h3>Skip Trace</h3>
-
-  {% if skip_trace_error %}
-    <p style="color:red; font-weight:bold;">{{ skip_trace_error }}</p>
-  {% elif skip_trace and skip_trace.results %}
-    {% for r in skip_trace.results %}
-      {% if r.persons %}
-        <ul class="skip-trace-list">
-          {% for p in r.persons %}
-            <li class="skip-trace-item">
-              {% if p.full_name %}
-                <div><strong>{{ p.full_name }}</strong></div>
-              {% endif %}
-
-              {% if p.phones %}
-                <div>
-                  <strong>Phones:</strong>
-                  <div>
-                    {% for ph in p.phones %}
-                      <div class="skip-phone-line">
-                        {{ ph.number }}
-                        {% if ph.type %} ({{ ph.type }}){% endif %}
-                        {% if ph.score is not none %} — Score: {{ ph.score }}{% endif %}
-                        {% if ph.last_reported %}
-                          — Last: {{ ph.last_reported[:10] }}
-                        {% endif %}
-                        {% if ph.tested is not none %}
-                          — Tested: {% if ph.tested %}✓{% else %}✗{% endif %}
-                        {% endif %}
-                        {% if ph.reachable is not none %}
-                          — Reachable: {% if ph.reachable %}✓{% else %}✗{% endif %}
-                        {% endif %}
-                        {% if ph.dnc is not none %}
-                          — DNC: {% if ph.dnc %}✓{% else %}✗{% endif %}
-                        {% endif %}
-                      </div>
-                    {% endfor %}
-                  </div>
+<!-- Two-column layout for Overview tab -->
+<div class="overview-grid">
+    <div class="overview-left">
+        <!-- Address Section -->
+        <div class="card">
+            <div class="card-body">
+                <div class="address-header">
+                    <div>
+                        <h3 style="margin: 0 0 4px 0; font-size: 18px;">{{ (case.address_override or case.address)|title }}</h3>
+                        <p style="margin: 0; color: var(--text-secondary); font-size: 14px;">
+                            Parcel ID: {{ case.parcel_id or '—' }} | Filed: {{ case.filing_datetime or '—' }}
+                        </p>
+                    </div>
+                    <button class="btn btn-ghost btn-sm" onclick="toggleAddressEdit(true)">Edit</button>
                 </div>
-              {% endif %}
-
-              {% if p.emails %}
-                <div style="margin-top:0.25rem;">
-                  <strong>Emails:</strong>
-                  <div>
-                    {% for em in p.emails %}
-                      <div class="skip-email-line">
-                        {{ em.email }}
-                        {% if em.tested is not none %}
-                          — Tested: {% if em.tested %}✓{% else %}✗{% endif %}
-                        {% endif %}
-                      </div>
-                    {% endfor %}
-                  </div>
+                
+                <div id="addressEdit" style="display:none; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border);">
+                    <form method="post" action="/cases/{{ case.id }}/update">
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label class="form-label">Address</label>
+                            <input type="text" name="address_override" class="form-control" 
+                                   value="{{ (case.address_override or case.address)|title }}">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label class="form-label">Parcel ID</label>
+                            <input type="text" name="parcel_id" class="form-control" 
+                                   value="{{ case.parcel_id or '' }}">
+                        </div>
+                        <div style="display: flex; gap: 8px;">
+                            <button class="btn btn-primary btn-sm" type="submit">Save</button>
+                            <button class="btn btn-secondary btn-sm" type="button" onclick="toggleAddressEdit(false)">Cancel</button>
+                        </div>
+                    </form>
                 </div>
-              {% endif %}
-            </li>
-          {% endfor %}
-        </ul>
-      {% else %}
-        <p><em>No contact persons found.</em></p>
-      {% endif %}
-    {% endfor %}
-  {% else %}
-    <p><em>No skip trace results yet.</em></p>
-  {% endif %}
-</section>
-
-<div class="docs-notes-row">
-  <section class="documents-section">
-    <h3>Documents</h3>
-
-    <ul>
-      {% set has_docs = false %}
-
-      {% if case.verified_complaint_path %}
-        {% set has_docs = true %}
-        <li>
-          Verified Complaint —
-          <a href="{{ url_for('uploads', path=case.verified_complaint_path) }}" target="_blank">
-            View PDF
-          </a>
-        </li>
-      {% endif %}
-
-      {% if case.mortgage_path %}
-        {% set has_docs = true %}
-        <li>
-          Mortgage —
-          <a href="{{ url_for('uploads', path=case.mortgage_path) }}" target="_blank">
-            View PDF
-          </a>
-        </li>
-      {% endif %}
-
-      {% if case.current_deed_path %}
-        {% set has_docs = true %}
-        <li>
-          Current Deed —
-          <a href="{{ url_for('uploads', path=case.current_deed_path) }}" target="_blank">
-            View PDF
-          </a>
-        </li>
-      {% endif %}
-
-      {% if case.previous_deed_path %}
-        {% set has_docs = true %}
-        <li>
-          Previous Deed —
-          <a href="{{ url_for('uploads', path=case.previous_deed_path) }}" target="_blank">
-            View PDF
-          </a>
-        </li>
-      {% endif %}
-
-      {% if case.value_calc_path %}
-        {% set has_docs = true %}
-        <li>
-          Value Calculation —
-          <a href="{{ url_for('uploads', path=case.value_calc_path) }}" target="_blank">
-            View PDF
-          </a>
-        </li>
-      {% endif %}
-
-      {% for d in case.dockets or [] %}
-        {% set has_docs = true %}
-        <li>
-          <a href="{{ d.file_url or '#' }}" target="_blank">
-            {{ d.description or d.file_name or 'Document' }}
-          </a>
-        </li>
-      {% endfor %}
-
-      {% if not has_docs %}
-        <li><em>No documents uploaded.</em></li>
-      {% endif %}
-    </ul>
-
-    <h4 style="margin-top:0.75rem;">Upload document</h4>
-
-    <form method="post"
-          action="/cases/{{ case.id }}/documents/upload"
-          enctype="multipart/form-data"
-          style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center; margin-top:0.25rem;">
-      <input type="file" name="file" required
-             accept="application/pdf"
-             style="max-width:260px;">
-
-      <select name="doc_type" required
-              style="min-width:180px;">
-        <option value="" disabled selected>Select type…</option>
-        <option value="verified">Verified Complaint</option>
-        <option value="mortgage">Mortgage</option>
-        <option value="current_deed">Current Deed</option>
-        <option value="previous_deed">Previous Deed</option>
-        <option value="value_calc">Value Calculation</option>
-        <option value="other">Other / Misc</option>
-      </select>
-
-      <button class="btn" type="submit">Upload</button>
-    </form>
-  </section>
-
-  <section class="notes-section">
-    <h3>Notes</h3>
-
-    <form method="post" action="/cases/{{ case.id }}/notes/add" class="note-form">
-      <textarea name="content" rows="2" placeholder="Add a note..."></textarea>
-      <button class="btn" type="submit">Add Note</button>
-    </form>
-
-    <ul class="notes-list">
-    {% if notes %}
-    {% for n in notes %}
-      <li>
-        {% if n.created_at is defined and n.created_at %}
-          <small class="note-date">
-            {{ n.created_at.strftime("%m/%d/%Y %I:%M %p")
-               if n.created_at.__class__.__name__ in ["datetime", "date"]
-               else n.created_at }}
-          </small>
-        {% endif %}
-
-        <a class="note-delete" href="/cases/{{ case.id }}/notes/{{ n.id }}/delete">delete</a>
-
-        <span class="note-text">
-          {% if n.content is defined or n.text is defined or n.body is defined %}
-            {{ n.content or n.text or n.body }}
-          {% else %}
-            {{ n }}
-          {% endif %}
-        </span>
-      </li>
-    {% endfor %}
-    {% else %}
-      <li><em>No notes yet.</em></li>
-    {% endif %}
-    </ul>
-  </section>
+                
+                <!-- Street View -->
+                {% set sv_addr = case.address_override or case.address %}
+                <div class="streetview-container" style="margin-top: 16px;">
+                    {% if sv_addr and streetview_url and streetview_url(sv_addr) %}
+                        <img src="{{ streetview_url(sv_addr) }}" alt="Street View" class="streetview-img"
+                             onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                        <div class="streetview-placeholder" style="display:none;">
+                            <span style="font-size: 32px;">📍</span>
+                            <span>Street View unavailable</span>
+                            <a href="https://www.google.com/maps?q={{ sv_addr|urlencode }}&layer=c" target="_blank" class="btn btn-secondary btn-sm">Open in Maps</a>
+                        </div>
+                    {% else %}
+                        <div class="streetview-placeholder">
+                            <span style="font-size: 32px;">📍</span>
+                            <span>Street View unavailable</span>
+                            <a href="https://www.google.com/maps?q={{ sv_addr|urlencode }}&layer=c" target="_blank" class="btn btn-secondary btn-sm">Open in Maps</a>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        
+        <!-- Defendants Section -->
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Defendants</h3>
+            </div>
+            <div class="card-body">
+                {% if defendants and defendants|length %}
+                    <ul style="list-style: none; padding: 0; margin: 0;">
+                        {% for d in defendants %}
+                            {% set name = (d.name or '')|string %}
+                            {% if name and name|lower != 'nan' %}
+                                <li style="padding: 8px 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 8px;">
+                                    <span style="width: 32px; height: 32px; background: var(--bg-alt); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px;">👤</span>
+                                    {{ name }}
+                                </li>
+                            {% endif %}
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p style="color: var(--text-muted); margin: 0;">No defendants recorded.</p>
+                {% endif %}
+            </div>
+        </div>
+        
+        <!-- Skip Trace Section -->
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Skip Trace</h3>
+            </div>
+            <div class="card-body">
+                {% if skip_trace_error %}
+                    <div class="alert alert-danger">{{ skip_trace_error }}</div>
+                {% elif skip_trace and skip_trace.results %}
+                    {% for r in skip_trace.results %}
+                        {% if r.persons %}
+                            {% for p in r.persons %}
+                                <div style="padding: 12px; background: var(--bg-alt); border-radius: 8px; margin-bottom: 12px;">
+                                    {% if p.full_name %}
+                                        <div style="font-weight: 600; margin-bottom: 8px;">{{ p.full_name }}</div>
+                                    {% endif %}
+                                    {% if p.phones %}
+                                        <div style="margin-bottom: 8px;">
+                                            <span style="font-size: 12px; color: var(--text-muted); text-transform: uppercase;">Phones</span>
+                                            {% for ph in p.phones %}
+                                                <div style="padding: 4px 0; font-size: 14px;">📞 {{ ph.number }}{% if ph.type %} <span class="badge badge-neutral">{{ ph.type }}</span>{% endif %}</div>
+                                            {% endfor %}
+                                        </div>
+                                    {% endif %}
+                                    {% if p.emails %}
+                                        <div>
+                                            <span style="font-size: 12px; color: var(--text-muted); text-transform: uppercase;">Emails</span>
+                                            {% for em in p.emails %}
+                                                <div style="padding: 4px 0; font-size: 14px;">✉️ {{ em.email }}</div>
+                                            {% endfor %}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            {% endfor %}
+                        {% else %}
+                            <p style="color: var(--text-muted);">No contact persons found.</p>
+                        {% endif %}
+                    {% endfor %}
+                {% else %}
+                    <p style="color: var(--text-muted);">No skip trace results yet.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <div class="overview-right">
+        <!-- Outstanding Liens -->
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Outstanding Liens</h3>
+                <button class="btn btn-primary btn-sm" id="lien-modal-open">+ Add Lien</button>
+            </div>
+            <div class="card-body">
+                <div id="liens-list"></div>
+                <div id="liens-saving" style="display:none; text-align: center; padding: 12px; color: var(--text-muted);">Saving…</div>
+            </div>
+        </div>
+        
+        <!-- Value Calculation -->
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Value Calculation</h3>
+            </div>
+            <div class="card-body">
+                <form method="post" action="/cases/{{ case.id }}/update">
+                    <div class="form-group">
+                        <label class="form-label">ARV (After Repair Value)</label>
+                        <input type="text" name="arv" id="arv-input" class="form-control"
+                               value="{% if arv %}${{ '{:,.0f}'.format(arv) }}{% endif %}" placeholder="Enter ARV">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Condition</label>
+                        {% set rc = rehab_condition or 'Good' %}
+                        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                            {% for cond in ['Poor', 'Fair', 'Good', 'Excellent'] %}
+                            <label class="condition-chip {% if rc == cond %}active{% endif %}">
+                                <input type="radio" name="rehab_condition" value="{{ cond }}" {% if rc == cond %}checked{% endif %}>
+                                <span>{{ cond }}</span>
+                            </label>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Rehab Estimate</label>
+                        <input type="text" name="rehab" id="rehab-input" class="form-control"
+                               value="{% if rehab and rehab > 0 %}${{ '{:,.0f}'.format(rehab) }}{% endif %}"
+                               placeholder="{% if rehab_suggested %}Suggested: ${{ '{:,.0f}'.format(rehab_suggested) }}{% endif %}">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Closing Costs</label>
+                        <input type="text" name="closing_costs" class="form-control"
+                               value="{% if closing_input and closing_input > 0 %}${{ '{:,.0f}'.format(closing_input) }}{% endif %}"
+                               placeholder="{% if arv %}Suggested: ${{ '{:,.0f}'.format(arv * 0.045) }}{% endif %}">
+                    </div>
+                    
+                    <div style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%); padding: 16px; border-radius: 8px; margin-bottom: 16px; border: 1px solid rgba(102, 126, 234, 0.2);">
+                        <div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px;">JSN Offer Range</div>
+                        <div style="font-size: 24px; font-weight: 700; color: var(--primary);">
+                            {% if wholesale_offer > 0 %}
+                                ${{ '{:,.0f}'.format(wholesale_offer) }} - ${{ '{:,.0f}'.format(flip_offer) }}
+                            {% else %}
+                                Set ARV to calculate
+                            {% endif %}
+                        </div>
+                    </div>
+                    
+                    <button class="btn btn-primary" type="submit" style="width: 100%;">Save Changes</button>
+                </form>
+            </div>
+        </div>
+        
+        <!-- Notes -->
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Notes</h3>
+            </div>
+            <div class="card-body">
+                <form method="post" action="/cases/{{ case.id }}/notes/add" style="margin-bottom: 16px;">
+                    <textarea name="content" rows="2" placeholder="Add a note..." class="form-control" style="margin-bottom: 8px;"></textarea>
+                    <button class="btn btn-primary btn-sm" type="submit">Add Note</button>
+                </form>
+                <ul style="list-style: none; padding: 0; margin: 0;">
+                    {% if notes %}
+                        {% for n in notes %}
+                            <li class="note-item">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                                    <small style="color: var(--text-muted);">
+                                        {% if n.created_at is defined and n.created_at %}
+                                            {{ n.created_at.strftime("%m/%d/%Y %I:%M %p") if n.created_at.__class__.__name__ in ["datetime", "date"] else n.created_at }}
+                                        {% endif %}
+                                    </small>
+                                    <a href="/cases/{{ case.id }}/notes/{{ n.id }}/delete" class="btn btn-ghost btn-sm" style="color: var(--danger);">Delete</a>
+                                </div>
+                                <div>{{ n.content or n.text or n.body or n }}</div>
+                            </li>
+                        {% endfor %}
+                    {% else %}
+                        <li style="padding: 12px; color: var(--text-muted); text-align: center;">No notes yet.</li>
+                    {% endif %}
+                </ul>
+            </div>
+        </div>
+    </div>
 </div>
 
 {% include "cases/_case_overview_lien_modal.html" %}

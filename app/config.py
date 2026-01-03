@@ -1,4 +1,10 @@
 # app/config.py
+"""
+Application Configuration
+✅ NO CIRCULAR IMPORTS - Only imports from standard library and pydantic
+✅ NO DUPLICATE DEFINITIONS - Clean, single source of truth
+"""
+
 from __future__ import annotations
 
 import os
@@ -11,7 +17,12 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 
 
 class Settings(BaseSettings):
-    """Application configuration with environment variable support"""
+    """
+    Application configuration with environment variable support
+    
+    All settings can be overridden via environment variables or .env file.
+    Environment variables take precedence over .env file values.
+    """
     
     # ========== Database ==========
     database_url: str = f"sqlite:///{BASE_DIR}/foreclosures.db"
@@ -24,10 +35,10 @@ class Settings(BaseSettings):
     # ========== Feature Flags ==========
     enable_skip_trace: bool = True
     enable_property_lookup: bool = True
-    enable_ocr: bool = False  # Requires additional setup
+    enable_ocr: bool = False  # Requires additional setup (tesseract or AWS Textract)
     enable_comparables: bool = True
     enable_analytics: bool = True
-    enable_multi_user: bool = False  # Set to True when ready
+    enable_multi_user: bool = False  # Set to True to enable user authentication
     
     # ========== Performance ==========
     max_workers: int = 4
@@ -44,13 +55,13 @@ class Settings(BaseSettings):
     enable_celery: bool = False
     
     # ========== Security ==========
-    secret_key: str = "CHANGE_THIS_IN_PRODUCTION_TO_RANDOM_STRING"
+    secret_key: str = os.getenv("SECRET_KEY", "CHANGE-ME-IN-PRODUCTION-USE-LONG-RANDOM-STRING")
     session_expire_minutes: int = 60 * 24  # 24 hours
     bcrypt_rounds: int = 12
     
     # ========== Logging ==========
     log_level: str = "INFO"
-    log_file: Optional[str] = None  # None = console only
+    log_file: Optional[str] = None  # None = console only, otherwise path to log file
     
     # ========== Email Notifications (optional) ==========
     smtp_host: Optional[str] = None
@@ -65,7 +76,7 @@ class Settings(BaseSettings):
     upload_max_size_mb: int = 50
     
     # ========== OCR Settings ==========
-    ocr_engine: str = "tesseract"  # tesseract or aws_textract
+    ocr_engine: str = "tesseract"  # Options: "tesseract" or "aws_textract"
     aws_region: Optional[str] = None
     aws_access_key_id: Optional[str] = None
     aws_secret_access_key: Optional[str] = None
@@ -76,69 +87,65 @@ class Settings(BaseSettings):
     scraper_headless: bool = True
     scraper_max_records: int = 0  # 0 = unlimited
     
+    # ========== Pydantic Configuration ==========
     model_config = SettingsConfigDict(
         env_file=str(BASE_DIR / ".env"),
         env_file_encoding="utf-8",
         case_sensitive=False,
-        extra="ignore",
+        extra="ignore",  # Ignore unknown env vars
     )
+    
+    # ========== Computed Properties ==========
     
     @property
     def database_path(self) -> Path:
-        """Extract file path from sqlite URL"""
+        """
+        Extract file path from sqlite URL
+        
+        Returns:
+            Path object pointing to the database file
+        """
         if self.database_url.startswith("sqlite:///"):
             return Path(self.database_url.replace("sqlite:///", ""))
         return BASE_DIR / "foreclosures.db"
     
     @property
     def is_redis_enabled(self) -> bool:
+        """Check if Redis caching is configured and enabled"""
         return self.enable_redis_cache and self.redis_url is not None
     
     @property
     def is_celery_enabled(self) -> bool:
+        """Check if Celery background tasks are configured and enabled"""
         return self.enable_celery and self.celery_broker_url is not None
+    
+    # ========== Validation ==========
+    
+    def validate_secret_key(self) -> None:
+        """
+        Validate that secret key is properly configured for production
+        
+        Raises:
+            ValueError: If secret key is not set or too short
+        """
+        if not self.secret_key or self.secret_key == "CHANGE-ME-IN-PRODUCTION-USE-LONG-RANDOM-STRING":
+            raise ValueError(
+                "SECRET_KEY must be set in production! "
+                "Generate with: python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+            )
+        
+        if len(self.secret_key) < 32:
+            raise ValueError(
+                "SECRET_KEY must be at least 32 characters for security. "
+                f"Current length: {len(self.secret_key)}"
+            )
 
 
-# Global settings instance
- # ... all your existing fields ...
-    
-    log_level: str = "INFO"
-    google_maps_api_key: str = ""
-    batchdata_api_key: str = ""
-    items_per_page: int = 25
-    
-    # ... rest of fields ...
-    
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-        extra="ignore",
-    )
-    
-    # ADD THESE PROPERTIES for backward compatibility:
-    @property
-    def LOG_LEVEL(self):
-        return self.log_level.upper()
-    
-    @property
-    def GOOGLE_MAPS_API_KEY(self):
-        return self.google_maps_api_key
-    
-    @property
-    def BATCHDATA_API_KEY(self):
-        return self.batchdata_api_key
-    
-    @property
-    def ITEMS_PER_PAGE(self):
-        return self.items_per_page
-    
-    @property
-    def APP_NAME(self):
-        return self.app_name
-    
-    @property
-    def DATABASE_URL(self):
-        return self.database_url
-
+# ========== Global Settings Instance ==========
+# Create single instance - do not duplicate!
 settings = Settings()
+
+
+# ========== Validation on Import ==========
+# Uncomment this in production to enforce secret key validation:
+# settings.validate_secret_key()

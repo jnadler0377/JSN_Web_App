@@ -1,281 +1,385 @@
-
 {% extends "base.html" %}
+{% block title %}Cases - JSN Holdings{% endblock %}
+
 {% block content %}
-<h2>Cases</h2>
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
+    <div>
+        <h1 class="page-title">Cases</h1>
+        <p class="page-subtitle">Manage your foreclosure cases and track progress.</p>
+    </div>
+    <a href="/cases/new" class="btn btn-primary">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="16"/>
+            <line x1="8" y1="12" x2="16" y2="12"/>
+        </svg>
+        Add Case
+    </a>
+</div>
 
-<form id="bulk-actions" method="post">
-  <div style="display:flex; gap: 0.5rem; align-items:center; flex-wrap: wrap; margin: 0.5rem 0;">
-    <input type="search" name="case" value="{{ search_query or '' }}" placeholder="Search address">
-    <button type="submit" formaction="/cases" formmethod="get">Search</button>
-
-    <label style="margin-left:1rem;">
-      Tag
-      <select name="tag" onchange="this.form.action='/cases'; this.form.method='get'; this.form.submit();">
-        <option value="">All</option>
-        {% for t in tag_options %}
-          <option value="{{ t }}" {% if tag_filter == t %}selected{% endif %}>{{ t }}</option>
-        {% endfor %}
-      </select>
-    </label>
-
-    <label style="margin-left:1rem;">
-      Page size
-      <select name="page_size" onchange="this.form.action='/cases'; this.form.method='get'; this.form.submit();">
-        {% for n in [10, 25, 50, 100] %}
-          <option value="{{ n }}" {% if page_size == n %}selected{% endif %}>{{ n }}</option>
-        {% endfor %}
-      </select>
-    </label>
-
-    <label style="margin-left:1rem;">
-      <input type="checkbox" id="show-archived-toggle" {% if show_archived %}checked{% endif %}
-             onclick="window.location.href='?page={{ pagination.page }}&show_archived=&page_size={{ page_size }}'+(this.checked?1:0){% if search_query %}+'&case={{ search_query }}'{% endif %}{% if tag_filter %}+'&tag={{ tag_filter }}'{% endif %}">
-      Show archived
-    </label>
-
-    <button type="submit" id="btn-archive" formaction="/cases/archive" formmethod="post" style="font-size:0.6em; padding:0.5em 0.6em;">Archive Selected</button>
-    <button type="submit" id="btn-unarchive" formaction="/cases/unarchive" formmethod="post" style="font-size:0.6em; padding:0.5em 0.6em;">Unarchive Selected</button>
-    <button type="submit" id="btn-export" formaction="/cases/export" formmethod="post" style="font-size:0.6em; padding:0.5em 0.6em;">Export CSV</button>
-    <button type="submit" id="btn-export-crm" formaction="/cases/export_crm" formmethod="post" style="font-size:0.6em; padding:0.5em 0.6em;">Export CRM CSV</button>
-    <button type="submit" id="btn-deal-calcs" formaction="/cases/reports/download" formmethod="post" style="font-size:0.6em; padding:0.5em 0.6em;">Download Deal Calculators</button>
-    <label style="margin-left:0.25rem; font-size:0.7em;">
-      <input type="checkbox" name="include_attachments" value="1" checked>
-      Include attached documents
-    </label>
-<a class="btn" href="/cases/new" style="font-size:0.6em; padding:0.5em 0.6em;">➕ Add Case</a>
-    <input type="hidden" name="show_archived" value="{{ 1 if show_archived else 0 }}">
-    <input type="hidden" name="page" value="{{ pagination.page }}">
-  </div>
-
-<style>
-  .pagination .btn { font-size: 0.7em !important; padding: 0.25em 0.5em !important; }
-  .pagination span { font-size: 0.7em !important; }
-  .table { font-size: 0.75em; }
-  .table tbody tr { cursor: pointer; }
-  .table tbody tr:focus { outline: 2px solid #007bff; }
-  .table th, .table td { padding: 0.5em; vertical-align: middle; }
-  .faded { opacity: 0.45; }
-  .pill { display:inline-block; padding:2px 8px; border-radius:999px; background:#eef2ff; color:#3730a3; font-size:11px; }
-  .pill-tag { background:#1f3d2e; color:#a6f3c5; }
-  .pill-warn { background:#412222; color:#ffb3b3; }
-</style>
+<!-- Filters & Actions Bar -->
+<div class="card" style="margin-bottom: var(--space-lg);">
+    <div class="card-body" style="padding: var(--space-md) var(--space-lg);">
+        <form id="bulk-actions" method="post">
+            <div style="display: flex; gap: var(--space-md); align-items: center; flex-wrap: wrap;">
+                <!-- Search -->
+                <div style="position: relative; flex: 1; min-width: 200px; max-width: 300px;">
+                    <svg style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 18px; height: 18px; color: var(--text-muted);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="8"/>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                    </svg>
+                    <input type="search" name="case" value="{{ search_query or '' }}" placeholder="Search address..." 
+                           style="padding-left: 40px;">
+                </div>
+                <button type="submit" formaction="/cases" formmethod="get" class="btn btn-secondary">Search</button>
+                
+                <!-- Tag Filter -->
+                <select name="tag" onchange="this.form.action='/cases'; this.form.method='get'; this.form.submit();" style="min-width: 120px;">
+                    <option value="">All Tags</option>
+                    {% for t in tag_options %}
+                        <option value="{{ t }}" {% if tag_filter == t %}selected{% endif %}>{{ t }}</option>
+                    {% endfor %}
+                </select>
+                
+                <!-- Page Size -->
+                <select name="page_size" onchange="this.form.action='/cases'; this.form.method='get'; this.form.submit();" style="width: 80px;">
+                    {% for n in [10, 25, 50, 100] %}
+                        <option value="{{ n }}" {% if page_size == n %}selected{% endif %}>{{ n }}</option>
+                    {% endfor %}
+                </select>
+                
+                <!-- Show New Toggle (no address) -->
+                <label style="display: flex; align-items: center; gap: var(--space-sm); cursor: pointer; font-size: 14px; color: var(--text-secondary);">
+                    <input type="checkbox" id="show-new-toggle" {% if show_new %}checked{% endif %}
+                           onclick="window.location.href='?page=1&show_new='+(this.checked?1:0)+'&show_archived=0&page_size={{ page_size }}&sort_by={{ sort_by or 'case_number' }}&sort_order={{ sort_order or 'desc' }}'{% if tag_filter %}+'&tag={{ tag_filter }}'{% endif %}"
+                           style="width: 18px; height: 18px;">
+                    Show new
+                </label>
+                
+                <!-- Show Archived Toggle -->
+                <label style="display: flex; align-items: center; gap: var(--space-sm); cursor: pointer; font-size: 14px; color: var(--text-secondary);">
+                    <input type="checkbox" id="show-archived-toggle" {% if show_archived %}checked{% endif %}
+                           onclick="window.location.href='?page={{ pagination.page }}&show_archived='+(this.checked?1:0)+'&page_size={{ page_size }}&sort_by={{ sort_by or 'case_number' }}&sort_order={{ sort_order or 'desc' }}'{% if search_query %}+'&case={{ search_query }}'{% endif %}{% if tag_filter %}+'&tag={{ tag_filter }}'{% endif %}"
+                           style="width: 18px; height: 18px;">
+                    Show archived
+                </label>
+                
+                <div style="border-left: 1px solid var(--border); height: 32px; margin: 0 var(--space-sm);"></div>
+                
+                <!-- Bulk Actions -->
+                <button type="submit" id="btn-archive" formaction="/cases/archive" formmethod="post" class="btn btn-secondary btn-sm">Archive</button>
+                <button type="submit" id="btn-unarchive" formaction="/cases/unarchive" formmethod="post" class="btn btn-secondary btn-sm">Unarchive</button>
+                <button type="submit" id="btn-export" formaction="/cases/export" formmethod="post" class="btn btn-secondary btn-sm">Export CSV</button>
+                <button type="submit" id="btn-export-crm" formaction="/cases/export_crm" formmethod="post" class="btn btn-secondary btn-sm">Export CRM</button>
+                <button type="submit" id="btn-deal-calcs" formaction="/cases/reports/download" formmethod="post" class="btn btn-secondary btn-sm">Deal Calcs</button>
+                
+                <label style="display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-muted);">
+                    <input type="checkbox" name="include_attachments" value="1" checked style="width: 14px; height: 14px;">
+                    Include docs
+                </label>
+                
+                <input type="hidden" name="show_archived" value="{{ 1 if show_archived else 0 }}">
+                <input type="hidden" name="page" value="{{ pagination.page }}">
+            </div>
+        </form>
+    </div>
+</div>
 
 {% if cases %}
-  <div id="toast" style="display:none; position:fixed; right:16px; bottom:16px; background:#111; color:#fff; padding:10px 14px; border-radius:10px;">Done.</div>
-  <table class="table">
-    <thead>
-      <tr>
-        <th><input type="checkbox" id="check-all"></th>
-        <th>Case #</th>
-        <th>Filed</th>
-        <th>Style</th>
-        <th>Address</th>
-        <th></th>
-      </tr>
-    </thead>
-    <tbody id="case-tbody">
-      {% for c in cases %}
-      {# mark archived in DOM via data-archived attr for instant UI updates #}
-      <tr data-href="/cases/{{ c.id }}" data-id="{{ c.id }}" data-archived="{{ 1 if c.archived else 0 }}" tabindex="0" role="link" aria-label="Open case {{ c.case_number }}">
-        <td><input type="checkbox" name="ids" value="{{ c.id }}" onclick="event.stopPropagation()"></td>
-        <td>{{ c.case_number }}</td>
-        <td>{{ c.filing_datetime }}</td>
-        <td>{{ c.style }}</td>
-        <td>
-  {% set addr = (c.address_override or c.address or '').strip() %}
-  {% if addr %}{{ addr }}{% else %}—{% endif %}
-</td>
+<!-- Toast notification -->
+<div id="toast" style="display:none; position:fixed; right:20px; bottom:20px; background:var(--surface); color:var(--text); padding:12px 20px; border-radius:var(--radius-md); box-shadow:var(--shadow-lg); border:1px solid var(--border); z-index:9999;">Done.</div>
 
-        <td>
-          {% if c.archived %}<span class="pill">Archived</span>{% endif %}
-          {% if short_sale.get(c.id) %}<span class="pill pill-warn">Short Sale</span>{% endif %}
-          {% for tag in quick_flags.get(c.id, []) %}
-            <span class="pill pill-tag">{{ tag }}</span>
-          {% endfor %}
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+<!-- Cases Table -->
+<div class="table-container">
+    <table class="table">
+        <thead>
+            <tr>
+                <th style="width: 40px;">
+                    <input type="checkbox" id="check-all" style="width: 18px; height: 18px;">
+                </th>
+                <th>
+                    <a href="?page=1&page_size={{ page_size }}&show_archived={{ 1 if show_archived else 0 }}&sort_by=case_number&sort_order={% if sort_by == 'case_number' and sort_order == 'asc' %}desc{% else %}asc{% endif %}{% if search_query %}&case={{ search_query }}{% endif %}{% if tag_filter %}&tag={{ tag_filter }}{% endif %}" 
+                       style="color: inherit; text-decoration: none; display: flex; align-items: center; gap: 4px;">
+                        Case #
+                        {% if sort_by == 'case_number' %}
+                            <span style="font-size: 12px;">{% if sort_order == 'asc' %}↑{% else %}↓{% endif %}</span>
+                        {% endif %}
+                    </a>
+                </th>
+                <th>
+                    <a href="?page=1&page_size={{ page_size }}&show_archived={{ 1 if show_archived else 0 }}&sort_by=filing_datetime&sort_order={% if sort_by == 'filing_datetime' and sort_order == 'asc' %}desc{% else %}asc{% endif %}{% if search_query %}&case={{ search_query }}{% endif %}{% if tag_filter %}&tag={{ tag_filter }}{% endif %}" 
+                       style="color: inherit; text-decoration: none; display: flex; align-items: center; gap: 4px;">
+                        Filed
+                        {% if sort_by == 'filing_datetime' %}
+                            <span style="font-size: 12px;">{% if sort_order == 'asc' %}↑{% else %}↓{% endif %}</span>
+                        {% endif %}
+                    </a>
+                </th>
+                <th>
+                    <a href="?page=1&page_size={{ page_size }}&show_archived={{ 1 if show_archived else 0 }}&sort_by=style&sort_order={% if sort_by == 'style' and sort_order == 'asc' %}desc{% else %}asc{% endif %}{% if search_query %}&case={{ search_query }}{% endif %}{% if tag_filter %}&tag={{ tag_filter }}{% endif %}" 
+                       style="color: inherit; text-decoration: none; display: flex; align-items: center; gap: 4px;">
+                        Style
+                        {% if sort_by == 'style' %}
+                            <span style="font-size: 12px;">{% if sort_order == 'asc' %}↑{% else %}↓{% endif %}</span>
+                        {% endif %}
+                    </a>
+                </th>
+                <th>
+                    <a href="?page=1&page_size={{ page_size }}&show_archived={{ 1 if show_archived else 0 }}&sort_by=address&sort_order={% if sort_by == 'address' and sort_order == 'asc' %}desc{% else %}asc{% endif %}{% if search_query %}&case={{ search_query }}{% endif %}{% if tag_filter %}&tag={{ tag_filter }}{% endif %}" 
+                       style="color: inherit; text-decoration: none; display: flex; align-items: center; gap: 4px;">
+                        Address
+                        {% if sort_by == 'address' %}
+                            <span style="font-size: 12px;">{% if sort_order == 'asc' %}↑{% else %}↓{% endif %}</span>
+                        {% endif %}
+                    </a>
+                </th>
+                <th style="width: 70px;">Score</th>
+            </tr>
+        </thead>
+        <tbody id="case-tbody">
+            {% for c in cases %}
+            {% set has_tags = c.archived or short_sale.get(c.id) or quick_flags.get(c.id, []) %}
+            <tr data-href="/cases/{{ c.id }}" data-id="{{ c.id }}" data-archived="{{ 1 if c.archived else 0 }}" 
+                tabindex="0" role="link" aria-label="Open case {{ c.case_number }}"
+                style="cursor: pointer; {% if c.archived %}opacity: 0.5;{% endif %}{% if has_tags %}border-bottom: none;{% endif %}">
+                <td onclick="event.stopPropagation()"{% if has_tags %} rowspan="2" style="vertical-align: middle;"{% endif %}>
+                    <input type="checkbox" name="ids" value="{{ c.id }}" onclick="event.stopPropagation()" style="width: 18px; height: 18px;">
+                </td>
+                <td><strong style="color: var(--primary);">{{ c.case_number }}</strong></td>
+                <td style="color: var(--text-secondary);">{{ c.filing_datetime }}</td>
+                <td class="truncate" style="max-width: 200px;">{{ c.style }}</td>
+                <td>
+                    {% set addr = (c.address_override or c.address or '').strip() %}
+                    {% if addr %}{{ addr }}{% else %}<span style="color: var(--text-muted);">—</span>{% endif %}
+                </td>
+                <td class="deal-score-cell" data-case-id="{{ c.id }}">
+                    <span style="color: var(--text-muted);">—</span>
+                </td>
+            </tr>
+            {% if has_tags %}
+            <tr data-href="/cases/{{ c.id }}" data-id="{{ c.id }}-tags" 
+                style="cursor: pointer; {% if c.archived %}opacity: 0.5;{% endif %}">
+                <td colspan="5" style="padding-top: 0; padding-bottom: 12px; border-top: none;">
+                    <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                        {% if c.archived %}<span class="badge badge-neutral">Archived</span>{% endif %}
+                        {% if short_sale.get(c.id) %}<span class="badge badge-warning">Short Sale</span>{% endif %}
+                        {% for tag in quick_flags.get(c.id, []) %}
+                            <span class="badge badge-success">{{ tag }}</span>
+                        {% endfor %}
+                    </div>
+                </td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
 </form>
 
-  <!-- Pagination -->
-  <nav class="pagination" aria-label="Pagination">
+<!-- Pagination -->
+<nav class="pagination" aria-label="Pagination" style="justify-content: center; margin-top: var(--space-xl);">
     {% if pagination.page > 1 %}
-      <a class="btn" href="?page=1&page_size={{ page_size }}&show_archived={{ 1 if show_archived else 0 }}{% if search_query %}&case={{ search_query }}{% endif %}{% if tag_filter %}&tag={{ tag_filter }}{% endif %}">« First</a>
-      <a class="btn" href="?page={{ pagination.page - 1 }}&page_size={{ page_size }}&show_archived={{ 1 if show_archived else 0 }}{% if search_query %}&case={{ search_query }}{% endif %}{% if tag_filter %}&tag={{ tag_filter }}{% endif %}">‹ Prev</a>
+        <a href="?page=1&page_size={{ page_size }}&show_archived={{ 1 if show_archived else 0 }}&sort_by={{ sort_by or 'case_number' }}&sort_order={{ sort_order or 'desc' }}{% if search_query %}&case={{ search_query }}{% endif %}{% if tag_filter %}&tag={{ tag_filter }}{% endif %}">« First</a>
+        <a href="?page={{ pagination.page - 1 }}&page_size={{ page_size }}&show_archived={{ 1 if show_archived else 0 }}&sort_by={{ sort_by or 'case_number' }}&sort_order={{ sort_order or 'desc' }}{% if search_query %}&case={{ search_query }}{% endif %}{% if tag_filter %}&tag={{ tag_filter }}{% endif %}">‹ Prev</a>
     {% else %}
-      <span class="btn disabled">« First</span>
-      <span class="btn disabled">‹ Prev</span>
+        <span class="disabled">« First</span>
+        <span class="disabled">‹ Prev</span>
     {% endif %}
-    <span>Page {{ pagination.page }} of {{ pagination.pages }}</span>
+    
+    <span class="active">Page {{ pagination.page }} of {{ pagination.pages }}</span>
+    
     {% if pagination.page < pagination.pages %}
-      <a class="btn" href="?page={{ pagination.page + 1 }}&page_size={{ page_size }}&show_archived={{ 1 if show_archived else 0 }}{% if search_query %}&case={{ search_query }}{% endif %}{% if tag_filter %}&tag={{ tag_filter }}{% endif %}">Next ›</a>
-      <a class="btn" href="?page={{ pagination.pages }}&page_size={{ page_size }}&show_archived={{ 1 if show_archived else 0 }}{% if search_query %}&case={{ search_query }}{% endif %}{% if tag_filter %}&tag={{ tag_filter }}{% endif %}">Last »</a>
+        <a href="?page={{ pagination.page + 1 }}&page_size={{ page_size }}&show_archived={{ 1 if show_archived else 0 }}&sort_by={{ sort_by or 'case_number' }}&sort_order={{ sort_order or 'desc' }}{% if search_query %}&case={{ search_query }}{% endif %}{% if tag_filter %}&tag={{ tag_filter }}{% endif %}">Next ›</a>
+        <a href="?page={{ pagination.pages }}&page_size={{ page_size }}&show_archived={{ 1 if show_archived else 0 }}&sort_by={{ sort_by or 'case_number' }}&sort_order={{ sort_order or 'desc' }}{% if search_query %}&case={{ search_query }}{% endif %}{% if tag_filter %}&tag={{ tag_filter }}{% endif %}">Last »</a>
     {% else %}
-      <span class="btn disabled">Next ›</span>
-      <span class="btn disabled">Last »</span>
+        <span class="disabled">Next ›</span>
+        <span class="disabled">Last »</span>
     {% endif %}
-  </nav>
-
-<script>
-(function(){
-  function qs(sel, root){ return (root||document).querySelector(sel); }
-  function qsa(sel, root){ return Array.from((root||document).querySelectorAll(sel)); }
-  const tbody = qs('#case-tbody');
-  const checkAll = qs('#check-all');
-  const toast = qs('#toast');
-  function showToast(msg){
-    toast.textContent = msg || 'Done.';
-    toast.style.display = 'block';
-    setTimeout(()=> toast.style.display='none', 1600);
-  }
-  // Row navigation (ignore clicks on inputs/links)
-  if (tbody){
-    tbody.addEventListener('click', function(e){
-      const tr = e.target.closest('tr[data-href]');
-      if (tr && !(e.target.tagName === 'A' || e.target.closest('a') || e.target.type === 'checkbox')) {
-        window.location.href = tr.getAttribute('data-href');
-      }
-    });
-    tbody.addEventListener('keydown', function(e){
-      const tr = e.target.closest('tr[data-href]');
-      if (tr && (e.key === 'Enter' || e.key === ' ')) {
-        e.preventDefault();
-        window.location.href = tr.getAttribute('data-href');
-      }
-    });
-  }
-  // Select all
-  if (checkAll){
-    checkAll.addEventListener('change', function(){
-      qsa('input[name="ids"]').forEach(cb => cb.checked = checkAll.checked);
-    });
-  }
-
-  // Helpers
-  function selectedIds(){
-    return qsa('input[name="ids"]:checked').map(cb => parseInt(cb.value, 10)).filter(Boolean);
-  }
-  function hideTr(id){
-    const tr = qs('tr[data-id="'+id+'"]');
-    if (tr) tr.remove();
-  }
-  function markArchived(id, archived){
-    const tr = qs('tr[data-id="'+id+'"]');
-    if (!tr) return;
-    tr.dataset.archived = archived ? '1' : '0';
-    const pill = tr.querySelector('.pill');
-    if (archived){
-      tr.classList.add('faded');
-      if (!pill){
-        const td = tr.querySelector('td:last-child');
-        const span = document.createElement('span');
-        span.className = 'pill';
-        span.textContent = 'Archived';
-        td.appendChild(span);
-      }
-    } else {
-      tr.classList.remove('faded');
-      if (pill) pill.remove();
-    }
-  }
-
-  // AJAX endpoints
-  async function postJSON(url, payload){
-    const form = new FormData();
-    if (payload && payload.ids){
-      payload.ids.forEach(id => form.append('ids', id));
-    }
-    const res = await fetch(url, { method: 'POST', body: form });
-    if (!res.ok){ throw new Error('Request failed: ' + res.status); }
-    const ctype = res.headers.get('content-type') || '';
-    if (ctype.includes('application/json')) return res.json();
-    return {};
-  }
-
-  async function postExport(url, payload){
-    const form = new FormData();
-    if (payload && payload.ids){
-      payload.ids.forEach(id => form.append('ids', id));
-    }
-    // persist filters
-    const showArchived = {{ 1 if show_archived else 0 }};
-    const search = {{ search_query|tojson|safe }};
-    form.append('show_archived', showArchived);
-    form.append('case', search || '');
-
-    const res = await fetch(url, { method: 'POST', body: form });
-    if (!res.ok){ throw new Error('Export failed: ' + res.status); }
-    const blob = await res.blob();
-    const dispo = res.headers.get('Content-Disposition') || 'attachment; filename="cases_export.csv"';
-    const match = dispo.match(/filename="?([^"]+)"?/i);
-    const filename = match ? match[1] : 'cases_export.csv';
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(()=>{
-      URL.revokeObjectURL(a.href);
-      a.remove();
-    }, 0);
-  }
-
-  // Wire buttons to AJAX
-  const btnArchive = qs('#btn-archive');
-  const btnUnarchive = qs('#btn-unarchive');
-  const btnExport = qs('#btn-export');
-
-  if (btnArchive){
-    btnArchive.addEventListener('click', async function(e){
-      if (!e.shiftKey){ e.preventDefault(); } // allow normal POST if Shift is held
-      const ids = selectedIds();
-      if (ids.length === 0) return;
-      try{
-        await postJSON('/cases/archive_async', { ids });
-        // If not showing archived, remove rows. If showing, mark faded.
-        const showArchived = {{ 1 if show_archived else 0 }};
-        ids.forEach(id => showArchived ? markArchived(id, true) : hideTr(id));
-        showToast('Archived ' + ids.length + ' case(s).');
-      } catch(err){ alert(err.message); }
-    });
-  }
-
-  if (btnUnarchive){
-    btnUnarchive.addEventListener('click', async function(e){
-      if (!e.shiftKey){ e.preventDefault(); }
-      const ids = selectedIds();
-      if (ids.length === 0) return;
-      try{
-        await postJSON('/cases/unarchive_async', { ids });
-        const showArchived = {{ 1 if show_archived else 0 }};
-        ids.forEach(id => {
-          if (showArchived){
-            markArchived(id, false);
-          } else {
-            // if archived are hidden, unarchived items would be visible anyway
-          }
-        });
-        showToast('Unarchived ' + ids.length + ' case(s).');
-      } catch(err){ alert(err.message); }
-    });
-  }
-
-  if (btnExport){
-    btnExport.addEventListener('click', async function(e){
-      if (!e.shiftKey){ e.preventDefault(); }
-      const ids = selectedIds();
-      try{
-        await postExport('/cases/export', { ids });
-        showToast('Export started…');
-      } catch(err){ alert(err.message); }
-    });
-  }
-})();
-</script>
+</nav>
 
 {% else %}
-  <p>No cases imported yet. Go to <a href="/import">Update Case List</a>.</p>
+<div class="card">
+    <div class="card-body" style="text-align: center; padding: var(--space-2xl);">
+        <div style="font-size: 48px; margin-bottom: var(--space-md);">📂</div>
+        <h3 style="margin-bottom: var(--space-sm);">No cases yet</h3>
+        <p style="color: var(--text-secondary); margin-bottom: var(--space-lg);">
+            Get started by importing cases or adding one manually.
+        </p>
+        <div style="display: flex; gap: var(--space-md); justify-content: center;">
+            <a href="/import" class="btn btn-primary">Update Case List</a>
+            <a href="/cases/new" class="btn btn-secondary">Add Case Manually</a>
+        </div>
+    </div>
+</div>
 {% endif %}
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function(){
+    function qs(sel, root){ return (root||document).querySelector(sel); }
+    function qsa(sel, root){ return Array.from((root||document).querySelectorAll(sel)); }
+    const tbody = qs('#case-tbody');
+    const checkAll = qs('#check-all');
+    const toast = qs('#toast');
+    
+    function showToast(msg){
+        toast.textContent = msg || 'Done.';
+        toast.style.display = 'block';
+        setTimeout(()=> toast.style.display='none', 2000);
+    }
+    
+    // Row navigation
+    if (tbody){
+        tbody.addEventListener('click', function(e){
+            const tr = e.target.closest('tr[data-href]');
+            if (tr && !(e.target.tagName === 'A' || e.target.closest('a') || e.target.type === 'checkbox')) {
+                window.location.href = tr.getAttribute('data-href');
+            }
+        });
+        tbody.addEventListener('keydown', function(e){
+            const tr = e.target.closest('tr[data-href]');
+            if (tr && (e.key === 'Enter' || e.key === ' ')) {
+                e.preventDefault();
+                window.location.href = tr.getAttribute('data-href');
+            }
+        });
+    }
+    
+    // Select all
+    if (checkAll){
+        checkAll.addEventListener('change', function(){
+            qsa('input[name="ids"]').forEach(cb => cb.checked = checkAll.checked);
+        });
+    }
+
+    function selectedIds(){
+        return qsa('input[name="ids"]:checked').map(cb => parseInt(cb.value, 10)).filter(Boolean);
+    }
+    
+    function hideTr(id){
+        const tr = qs('tr[data-id="'+id+'"]');
+        if (tr) tr.remove();
+    }
+    
+    function markArchived(id, archived){
+        const tr = qs('tr[data-id="'+id+'"]');
+        if (!tr) return;
+        tr.dataset.archived = archived ? '1' : '0';
+        tr.style.opacity = archived ? '0.5' : '1';
+    }
+
+    async function postJSON(url, payload){
+        const form = new FormData();
+        if (payload && payload.ids){
+            payload.ids.forEach(id => form.append('ids', id));
+        }
+        const res = await fetch(url, { method: 'POST', body: form });
+        if (!res.ok){ throw new Error('Request failed: ' + res.status); }
+        const ctype = res.headers.get('content-type') || '';
+        if (ctype.includes('application/json')) return res.json();
+        return {};
+    }
+
+    async function postExport(url, payload){
+        const form = new FormData();
+        if (payload && payload.ids){
+            payload.ids.forEach(id => form.append('ids', id));
+        }
+        const showArchived = {{ 1 if show_archived else 0 }};
+        const search = {{ search_query|tojson|safe }};
+        form.append('show_archived', showArchived);
+        form.append('case', search || '');
+
+        const res = await fetch(url, { method: 'POST', body: form });
+        if (!res.ok){ throw new Error('Export failed: ' + res.status); }
+        const blob = await res.blob();
+        const dispo = res.headers.get('Content-Disposition') || 'attachment; filename="cases_export.csv"';
+        const match = dispo.match(/filename="?([^"]+)"?/i);
+        const filename = match ? match[1] : 'cases_export.csv';
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(()=>{
+            URL.revokeObjectURL(a.href);
+            a.remove();
+        }, 0);
+    }
+
+    const btnArchive = qs('#btn-archive');
+    const btnUnarchive = qs('#btn-unarchive');
+    const btnExport = qs('#btn-export');
+
+    if (btnArchive){
+        btnArchive.addEventListener('click', async function(e){
+            if (!e.shiftKey){ e.preventDefault(); }
+            const ids = selectedIds();
+            if (ids.length === 0) return;
+            try{
+                await postJSON('/cases/archive_async', { ids });
+                const showArchived = {{ 1 if show_archived else 0 }};
+                ids.forEach(id => showArchived ? markArchived(id, true) : hideTr(id));
+                showToast('Archived ' + ids.length + ' case(s).');
+            } catch(err){ alert(err.message); }
+        });
+    }
+
+    if (btnUnarchive){
+        btnUnarchive.addEventListener('click', async function(e){
+            if (!e.shiftKey){ e.preventDefault(); }
+            const ids = selectedIds();
+            if (ids.length === 0) return;
+            try{
+                await postJSON('/cases/unarchive_async', { ids });
+                const showArchived = {{ 1 if show_archived else 0 }};
+                ids.forEach(id => markArchived(id, false));
+                showToast('Unarchived ' + ids.length + ' case(s).');
+            } catch(err){ alert(err.message); }
+        });
+    }
+
+    if (btnExport){
+        btnExport.addEventListener('click', async function(e){
+            if (!e.shiftKey){ e.preventDefault(); }
+            const ids = selectedIds();
+            try{
+                await postExport('/cases/export', { ids });
+                showToast('Export started…');
+            } catch(err){ alert(err.message); }
+        });
+    }
+})();
+
+// Load Deal Scores
+(function() {
+    async function loadDealScores() {
+        const cells = document.querySelectorAll('.deal-score-cell');
+        if (cells.length === 0) return;
+        
+        const caseIds = Array.from(cells).map(c => c.dataset.caseId);
+        
+        for (let i = 0; i < Math.min(caseIds.length, 20); i++) {
+            const caseId = caseIds[i];
+            const cell = document.querySelector(`.deal-score-cell[data-case-id="${caseId}"]`);
+            if (!cell) continue;
+            
+            try {
+                const response = await fetch(`/api/v2/cases/${caseId}/analyze`, { method: 'POST' });
+                if (response.ok) {
+                    const analysis = await response.json();
+                    if (analysis.score !== undefined) {
+                        const scoreClass = DealAnalysis.getScoreClass(analysis.score);
+                        cell.innerHTML = `<span class="deal-score-badge ${scoreClass}">${analysis.score}</span>`;
+                    }
+                }
+            } catch (e) {}
+        }
+    }
+    
+    setTimeout(loadDealScores, 500);
+})();
+</script>
 {% endblock %}

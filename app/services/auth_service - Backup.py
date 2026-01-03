@@ -6,37 +6,55 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
 
+import bcrypt
 from sqlalchemy import text
 from fastapi import HTTPException, Request, Depends
 from fastapi.responses import RedirectResponse
 
 from app.config import settings
 from app.database import engine, SessionLocal
-from app.auth import User, get_password_hash, verify_password
 
 logger = logging.getLogger("pascowebapp.auth")
 
 
+# ========================================
+# User Model (SQLAlchemy ORM)
+# ========================================
 
+from sqlalchemy import Column, Integer, String, DateTime
+from app.database import Base
+
+
+class User(Base):
+    __tablename__ = "users"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, nullable=False, index=True)
+    hashed_password = Column(String, nullable=False)
+    full_name = Column(String)
+    role = Column(String, default="analyst")  # admin, analyst, closer, viewer
+    is_active = Column(Integer, default=1)
+    created_at = Column(String)
+    last_login = Column(String)
 
 
 # ========================================
 # Password Hashing
 # ========================================
 
-#def hash_password(password: str) -> str:
-#    """Hash a password using bcrypt"""
-#    salt = bcrypt.gensalt(rounds=settings.bcrypt_rounds)
-#    return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
+def hash_password(password: str) -> str:
+    """Hash a password using bcrypt"""
+    salt = bcrypt.gensalt(rounds=settings.bcrypt_rounds)
+    return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
 
 
-#def verify_password(password: str, hashed: str) -> bool:
-#    """Verify a password against a hash"""
-#    try:
-#        return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
-#    except Exception as exc:
-#        logger.error(f"Password verification failed: {exc}")
-#        return False
+def verify_password(password: str, hashed: str) -> bool:
+    """Verify a password against a hash"""
+    try:
+        return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
+    except Exception as exc:
+        logger.error(f"Password verification failed: {exc}")
+        return False
 
 
 # ========================================
@@ -129,7 +147,7 @@ def create_user(email: str, password: str, full_name: str, role: str = "analyst"
     if role not in ["admin", "analyst", "closer", "viewer"]:
         raise ValueError(f"Invalid role: {role}")
     
-    hashed = get_password_hash(password)
+    hashed = hash_password(password)
     
     with engine.begin() as conn:
         # Check if email already exists
@@ -353,48 +371,19 @@ def create_default_admin():
         # Users already exist
         return
     
-    # Generate secure random password
-    import string
-    import secrets as sec
-    
-    alphabet = string.ascii_letters + string.digits + "!@#$%^&*()"
-    admin_password = ''.join(sec.choice(alphabet) for _ in range(20))
-    
     # Create default admin
     try:
         admin_id = create_user(
             email="admin@localhost",
-            password=admin_password,
+            password="admin123",  # Change this in production!
             full_name="System Administrator",
             role="admin"
         )
-        
-        # Save password to file
-        from pathlib import Path
-        password_file = Path("ADMIN_PASSWORD.txt")
-        with open(password_file, "w") as f:
-            f.write("="*60 + "\n")
-            f.write("DEFAULT ADMIN CREDENTIALS\n")
-            f.write("="*60 + "\n")
-            f.write(f"Email: admin@localhost\n")
-            f.write(f"Password: {admin_password}\n")
-            f.write(f"Generated: {datetime.utcnow().isoformat()}\n")
-            f.write("\n")
-            f.write("⚠️  IMPORTANT:\n")
-            f.write("1. Log in and change this password immediately!\n")
-            f.write("2. Delete this file after first login!\n")
-            f.write("="*60 + "\n")
-        
-        logger.critical("="*60)
-        logger.critical("🔐 DEFAULT ADMIN CREATED")
-        logger.critical(f"📧 Email: admin@localhost")
-        logger.critical(f"📄 Password saved to: {password_file.absolute()}")
-        logger.critical("⚠️  CHANGE PASSWORD IMMEDIATELY AFTER FIRST LOGIN!")
-        logger.critical("⚠️  DELETE ADMIN_PASSWORD.txt AFTER FIRST LOGIN!")
-        logger.critical("="*60)
-        
+        logger.info(f"Created default admin user (ID: {admin_id})")
+        logger.warning("⚠️  Default admin password is 'admin123' - CHANGE THIS IMMEDIATELY!")
     except Exception as exc:
         logger.error(f"Failed to create default admin: {exc}")
+
 
 # ========================================
 # Audit Logging

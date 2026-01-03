@@ -1,139 +1,540 @@
 {% extends "base.html" %}
-{% block content %}
+{% block title %}{{ case.case_number }} - JSN Holdings{% endblock %}
 
-{# ---------- Helper macros ---------- #}
-{% macro format_phone(num) %}
-  {%- set digits = (num or '') 
-      |replace('(', '') 
-      |replace(')', '') 
-      |replace('-', '') 
-      |replace(' ', '') 
-      |replace('.', '') 
-      |replace('+', '') -%}
-  {%- if digits|length == 10 -%}
-    ({{ digits[0:3] }}) {{ digits[3:6] }}-{{ digits[6:10] }}
-  {%- else -%}
-    {{ num }}
-  {%- endif -%}
-{% endmacro %}
-
-{% macro yn_icon(value) %}
-  {%- if value -%}
-    <span class="yn-icon yes">✓</span>
-  {%- else -%}
-    <span class="yn-icon no">✗</span>
-  {%- endif -%}
-{% endmacro %}
-
-{# ---------- NEW: numbers baseline (same logic as old working template) ---------- #}
-{% if case.arv %}
-    {% set arv = case.arv %}
-{% elif property_snapshot and property_snapshot.val_estimated_value %}
-    {% set arv = property_snapshot.val_estimated_value %}
-{% else %}
-    {% set arv = 0 %}
-{% endif %}
-
-{% set rehab   = case.rehab or 0 %}
-{% set closing = case.closing_costs or 0 %}
-{% set closing_input = case.closing_costs if case.closing_costs and case.closing_costs > 0 else None %}
-{% set ov = property_overrides or {} %}
-{% set props = property_payload['results']['properties'] if property_payload and property_payload.get('results') and property_payload['results'].get('properties') else [] %}
-{% set p = props[0] if props else {} %}
-{% set listing = p.get('listing') or {} %}
-{% set general = p.get('general') or {} %}
-{% set building = p.get('building') or {} %}
-{% set prop_year = listing.get('yearBuilt') or building.get('yearBuilt') or general.get('yearBuilt') or p.get('yearBuilt') %}
-{% set prop_sqft = listing.get('totalBuildingAreaSquareFeet') or building.get('livingAreaSqft') or general.get('buildingAreaSqft') %}
-{% set rehab_year_built = ov.get('year_built') or prop_year %}
-{% set rehab_sqft = ov.get('sqft') or prop_sqft %}
-{% set wholesale_offer = [0, (arv * 0.65) - rehab - closing] | max %}
-{% if arv > 350000 %}
-  {% set flip_offer = [0, (arv * 0.85) - rehab - closing] | max %}
-{% else %}
-  {% set flip_offer = [0, (arv * 0.80) - rehab - closing] | max %}
-{% endif %}
-
-
-{# ---------- Top header / buttons (unchanged from working version) ---------- #}
-
-<h2>Case {{ case.case_number }}</h2>
-
+{% block extra_css %}
 <style>
-  .sticky-actions{
-    position: sticky;
-    top: 0;
-    z-index: 50;
-    background: #000;
-    color: #fff;
-    border: 1px solid #222;
-    border-radius: 12px;
-    padding: 10px 12px;
-    margin: 10px 0 14px 0;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.06);
-    display:flex;
-    gap: 0.5rem;
+/* Case Detail Page Styles */
+.case-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: var(--space-lg);
     flex-wrap: wrap;
-    align-items:center;
-  }
-  .sticky-actions .btn{ margin:0 !important; }
-  .sticky-actions a{ color:#fff; }
+    gap: var(--space-md);
+}
+
+.case-header-left h1 {
+    font-size: 24px;
+    margin-bottom: 4px;
+}
+
+.case-meta {
+    display: flex;
+    gap: var(--space-lg);
+    color: var(--text-secondary);
+    font-size: 14px;
+    flex-wrap: wrap;
+}
+
+.case-actions {
+    display: flex;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+}
+
+/* Tabs */
+.case-tabs {
+    display: flex;
+    gap: 4px;
+    border-bottom: 2px solid var(--border);
+    margin-bottom: var(--space-lg);
+    overflow-x: auto;
+}
+
+.case-tab {
+    padding: 12px 20px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    text-decoration: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition: var(--transition);
+    cursor: pointer;
+    white-space: nowrap;
+    background: none;
+    border-top: none;
+    border-left: none;
+    border-right: none;
+}
+
+.case-tab:hover {
+    color: var(--text);
+    background: var(--bg-alt);
+}
+
+.case-tab.active {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+}
+
+.tab-content {
+    display: none;
+    animation: fadeIn 0.2s ease;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* Overview Grid */
+.overview-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-lg);
+}
+
+@media (max-width: 1024px) {
+    .overview-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.overview-left, .overview-right {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-lg);
+}
+
+/* Address & Street View */
+.address-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+}
+
+.streetview-container {
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: var(--bg-alt);
+}
+
+.streetview-img {
+    width: 100%;
+    height: 200px;
+    object-fit: cover;
+}
+
+.streetview-placeholder {
+    height: 200px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: var(--text-muted);
+}
+
+/* Condition Chips */
+.condition-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 16px;
+    background: var(--bg-alt);
+    border: 2px solid var(--border);
+    border-radius: var(--radius-full);
+    cursor: pointer;
+    font-size: 14px;
+    transition: var(--transition);
+}
+
+.condition-chip input {
+    display: none;
+}
+
+.condition-chip.active,
+.condition-chip:has(input:checked) {
+    background: rgba(102, 126, 234, 0.1);
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+.condition-chip:hover {
+    border-color: var(--primary);
+}
+
+/* Document Items */
+.doc-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border-light);
+}
+
+.doc-item:last-child {
+    border-bottom: none;
+}
+
+/* Note Items */
+.note-item {
+    padding: 12px;
+    background: var(--bg-alt);
+    border-radius: var(--radius-md);
+    margin-bottom: 8px;
+}
+
+.note-item:last-child {
+    margin-bottom: 0;
+}
+
+/* Liens */
+.lien-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px;
+    background: var(--bg-alt);
+    border-radius: var(--radius-md);
+    margin-bottom: 8px;
+}
+
+.lien-item:last-child {
+    margin-bottom: 0;
+}
+
+.lien-amount {
+    font-weight: 600;
+    color: var(--danger);
+}
+
+/* Lien Modal */
+.lien-modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+}
+
+.lien-modal.show {
+    display: flex;
+}
+
+.lien-modal-content {
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    padding: var(--space-xl);
+    width: 100%;
+    max-width: 400px;
+    box-shadow: var(--shadow-xl);
+}
+
+.lien-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-lg);
+}
+
+.lien-modal-header h4 {
+    margin: 0;
+}
+
+.lien-close {
+    font-size: 24px;
+    cursor: pointer;
+    color: var(--text-muted);
+}
+
+.lien-close:hover {
+    color: var(--text);
+}
+
+.lien-modal-actions {
+    display: flex;
+    gap: var(--space-sm);
+    justify-content: flex-end;
+    margin-top: var(--space-lg);
+}
+
+/* Property Tab Styles */
+.property-section {
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    padding: var(--space-lg);
+    border: 1px solid var(--border);
+    margin-bottom: var(--space-lg);
+}
+
+.property-section h3 {
+    margin: 0 0 var(--space-md) 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.property-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--space-md);
+}
+
+.property-field {
+    display: flex;
+    flex-direction: column;
+}
+
+.property-field label {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    margin-bottom: 4px;
+}
+
+.property-field .value {
+    padding: 10px 12px;
+    background: var(--bg-alt);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    font-size: 14px;
+}
+
+.flag-badge {
+    display: inline-block;
+    padding: 4px 12px;
+    background: var(--success-light);
+    color: var(--success);
+    border-radius: var(--radius-full);
+    font-size: 12px;
+    font-weight: 500;
+    margin: 4px 4px 4px 0;
+}
+
+.flag-badge.false {
+    background: var(--bg-alt);
+    color: var(--text-muted);
+}
+
+.history-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+.history-table th,
+.history-table td {
+    padding: 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+}
+
+.history-table th {
+    background: var(--bg-alt);
+    color: var(--text-secondary);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+}
+
+.history-table tbody tr:hover {
+    background: var(--bg-alt);
+}
+
+/* Deal Analysis Styles */
+.deal-analysis-card {
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    padding: var(--space-lg);
+    border: 1px solid var(--border);
+}
+
+.deal-analysis-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-lg);
+}
+
+.deal-analysis-header h4 {
+    margin: 0;
+    font-size: 16px;
+}
+
+.deal-score-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 16px;
+    border-radius: var(--radius-md);
+    font-weight: 700;
+}
+
+.deal-score-badge.excellent {
+    background: var(--success-light);
+    color: var(--success);
+}
+
+.deal-score-badge.good {
+    background: var(--info-light);
+    color: var(--info);
+}
+
+.deal-score-badge.fair {
+    background: var(--warning-light);
+    color: #b45309;
+}
+
+.deal-score-badge.poor {
+    background: var(--danger-light);
+    color: var(--danger);
+}
+
+.deal-metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: var(--space-md);
+    margin-bottom: var(--space-lg);
+}
+
+.deal-metric {
+    padding: var(--space-md);
+    background: var(--bg-alt);
+    border-radius: var(--radius-md);
+    text-align: center;
+}
+
+.deal-metric-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    margin-bottom: 4px;
+}
+
+.deal-metric-value {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text);
+}
+
+.deal-metric-value.positive {
+    color: var(--success);
+}
+
+.deal-metric-value.negative {
+    color: var(--danger);
+}
+
+.deal-recommendations h5 {
+    margin: 0 0 var(--space-sm) 0;
+    font-size: 14px;
+    color: var(--text-secondary);
+}
+
+.recommendation-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.recommendation-tag {
+    display: inline-block;
+    padding: 6px 12px;
+    background: rgba(102, 126, 234, 0.1);
+    color: var(--primary);
+    border-radius: var(--radius-full);
+    font-size: 13px;
+}
+
+.deal-analysis-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-sm);
+    padding: var(--space-xl);
+    color: var(--text-muted);
+}
+
+.spinner {
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--border);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.deal-analysis-error {
+    background: var(--danger-light);
+    color: var(--danger);
+    padding: var(--space-lg);
+    border-radius: var(--radius-md);
+    text-align: center;
+}
+
+/* Skip Trace Styles */
+.skip-person {
+    padding: var(--space-md);
+    background: var(--bg-alt);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--space-md);
+}
+
+.skip-person:last-child {
+    margin-bottom: 0;
+}
+
+.skip-section-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    margin-bottom: 4px;
+}
+
+/* Comparables */
+.comp-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-lg);
+    margin-bottom: var(--space-md);
+}
 </style>
+{% endblock %}
 
-
-<div class="sticky-actions">
-<a class="btn" href="/cases/{{ case.id }}/report" target="_blank"
-   style="font-size:0.85em; padding:0.4em 0.7em;">
-  Deal Calculator
-</a>
-
-{% if not (skip_trace and skip_trace.results) %}
-<form method="post" action="/cases/{{ case.id }}/skip-trace" class="js-disable-on-submit" style="display:inline;">
-  <button class="btn" type="submit"
-          style="font-size:0.85em; padding:0.4em 0.7em; margin-left:0.5rem;">
-    Skip Trace Owner
-  </button>
-</form>
-{% endif %}
-
-{% if not has_property_data %}
-       <form method="post" action="/cases/{{ case.id }}/property-lookup" style="display:inline;">
-         <button type="submit" class="btn">🔍 Fetch Property Data</button>
-       </form>
-   {% else %}
-       <span style="color: var(--muted);">
-           ✓ Property data fetched
-       </span>
-   {% endif %}
+{% block content %}
+<!-- Case Header -->
+<div class="case-header">
+    <div class="case-header-left">
+        <h1>{{ case.case_number }}</h1>
+        <div class="case-meta">
+            <span>📍 {{ (case.address_override or case.address or 'No address')|title }}</span>
+            <span>📅 Filed: {{ case.filing_datetime or '—' }}</span>
+            {% if case.style %}<span>⚖️ {{ case.style }}</span>{% endif %}
+        </div>
+    </div>
+    <div class="case-actions">
+        {% if not has_property_data %}
+        <form method="post" action="/cases/{{ case.id }}/property-lookup" style="display: inline;">
+            <button type="submit" class="btn btn-secondary">🔍 Fetch Property Data</button>
+        </form>
+        {% endif %}
+        <a href="/cases/{{ case.id }}/comparables" class="btn btn-secondary">📊 Comparables</a>
+        <a href="/cases" class="btn btn-ghost">← Back to Cases</a>
+    </div>
 </div>
 
-{% set pinellas_url = pinellas_appraiser_url(case.parcel_id) if case.parcel_id else None %}
-{% if pinellas_url %}
-  <div class="pasco-links">
-    <a href="{{ pinellas_url }}" target="_blank" rel="noopener">Pinellas Property Appraiser</a>
-    <span class="pasco-links-divider">|</span>
-    <a href="https://officialrecords.mypinellasclerk.gov/" target="_blank" rel="noopener">Pinellas Official Records</a>
-    <span class="pasco-links-divider">|</span>
-    <a href="https://courtrecords.mypinellasclerk.gov/" target="_blank" rel="noopener">Pinellas Clerk of Court</a>
-  </div>
-{% elif case.parcel_id %}
-  <div class="pasco-links">
-    <a href="{{ pasco_appraiser_url(case.parcel_id) }}" target="_blank" rel="noopener">Pasco Appraiser</a>
-    <span class="pasco-links-divider">|</span>
-    <a href="https://app.pascoclerk.com/appdot-public-online-services-forms-or-search.asp" target="_blank" rel="noopener">Pasco Official Records</a>
-    <span class="pasco-links-divider">|</span>
-    <a href="https://www.civitekflorida.com/ocrs/county/51/" target="_blank" rel="noopener">Pasco Clerk of Court</a>
-  </div>
-{% endif %}
-
-
-<!-- In case_detail.html, in the tabs section: -->
-<!-- Tabs -->
-<div class="tabs">
-    <button class="tab-button active" onclick="openTab(event, 'overview')">Overview</button>
-    <button class="tab-button" onclick="openTab(event, 'property')">Property</button>
-    <button class="tab-button" onclick="openTab(event, 'skiptrace')">Skip Trace</button>
-    <button class="tab-button" onclick="openTab(event, 'documents')">Documents</button>
+<!-- Case Tabs -->
+<div class="case-tabs">
+    <button class="case-tab active" data-tab="overview">Overview</button>
+    <button class="case-tab" data-tab="property">Property</button>
+    <button class="case-tab" data-tab="documents">Documents</button>
+    <button class="case-tab" data-tab="deal-analysis">Deal Analysis</button>
 </div>
 
 <!-- Tab Contents -->
@@ -142,776 +543,337 @@
 </div>
 
 <div id="tab-property" class="tab-content">
-       {% include "cases/_case_property_tab.html" %}
-   </div>
-
-<div id="tab-skiptrace" class="tab-content">
-    <h3>Skip Trace</h3>
-    {% if skip_trace and skip_trace.results %}
-        <!-- Skip trace content -->
-        {% include "cases/_case_skiptrace.html" %}
-    {% else %}
-        <p>No skip trace data.</p>
-        <form method="post" action="/cases/{{ case.id }}/skip-trace" class="js-disable-on-submit" style="display:inline;">
-          <button class="btn" type="submit">Run Skip Trace</button>
-        </form>
-    {% endif %}
+    {% include "cases/_case_property_tab.html" %}
 </div>
 
 <div id="tab-documents" class="tab-content">
-    <h3>Documents</h3>
-    {% include "cases/_case_documents.html" %}
+    {% include "cases/_case_documents_tab.html" %}
 </div>
 
+<div id="tab-deal-analysis" class="tab-content">
+    {% include "cases/_deal_analysis_component.html" %}
+</div>
+
+<!-- Lien Modal -->
+{% include "cases/_case_overview_lien_modal.html" %}
+
+{% endblock %}
+
+{% block extra_js %}
 <script>
-function toggleParcelEdit(show) {
-  document.getElementById('parcelEdit').style.display = show ? '' : 'none';
-}
+// Tab switching
+document.querySelectorAll('.case-tab').forEach(tab => {
+    tab.addEventListener('click', function() {
+        const tabId = this.dataset.tab;
+        document.querySelectorAll('.case-tab').forEach(t => t.classList.remove('active'));
+        this.classList.add('active');
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        document.getElementById('tab-' + tabId).classList.add('active');
+    });
+});
+
+// Address edit toggle
 function toggleAddressEdit(show) {
-  document.getElementById('addressEdit').style.display = show ? '' : 'none';
-}
-function togglePropertyEdit(show) {
-  const el = document.getElementById('propertyEdit');
-  if (el) {
-    el.style.display = show ? '' : 'none';
-  }
+    document.getElementById('addressEdit').style.display = show ? 'block' : 'none';
 }
 
-// ---- Outstanding Liens JS (existing) ----
-(function() {
-  const caseId = {{ case.id }};
-  const listEl = document.getElementById('liens-list');
-  const savingEl = document.getElementById('liens-saving');
-  const openBtn = document.getElementById('lien-modal-open');
-  const modal = document.getElementById('lienModal');
-  const form = document.getElementById('lienModalForm');
-  const holderInput = document.getElementById('lienHolder');
-  const amountInput = document.getElementById('lienAmount');
-  const indexInput = document.getElementById('lienIndex');
-  const closeBtn = document.getElementById('lienModalClose');
-  const cancelBtn = document.getElementById('lienModalCancel');
+function toggleParcelEdit(show) {
+    const el = document.getElementById('parcelEdit');
+    if (el) el.style.display = show ? 'block' : 'none';
+}
 
-  let liens = [];
-
-  function formatCurrency(val) {
-    let s = String(val ?? '').replace(/[^\d.]/g, '');
-    if (!s) return '$0.00';
-    const num = parseFloat(s);
-    if (isNaN(num)) return '$0.00';
-    return num.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
-  }
-
-  function render() {
-    if (!listEl) return;
-    listEl.innerHTML = '';
-    if (!liens.length) {
-      const empty = document.createElement('div');
-      empty.className = 'liens-empty-hint';
-      empty.textContent = 'No liens added yet.';
-      listEl.appendChild(empty);
-      return;
+// Currency formatting for inputs
+function formatCurrencyInput(input) {
+    let value = input.value.replace(/[^0-9.]/g, '');
+    if (value) {
+        const num = parseFloat(value);
+        if (!isNaN(num)) {
+            input.dataset.rawValue = num;
+        }
     }
-    liens.forEach((lien, idx) => {
-      const row = document.createElement('div');
-      row.className = 'lien-row';
+}
 
-      const left = document.createElement('div');
-      left.className = 'lien-left';
-      left.textContent = lien.holder + ' – ' + formatCurrency(lien.amount);
-
-      const right = document.createElement('div');
-      right.className = 'lien-actions';
-
-      const editBtn = document.createElement('button');
-      editBtn.type = 'button';
-      editBtn.textContent = 'Edit';
-      editBtn.className = 'btn btn-small';
-      editBtn.addEventListener('click', () => openModalForEdit(idx));
-
-      const delBtn = document.createElement('button');
-      delBtn.type = 'button';
-      delBtn.textContent = 'Delete';
-      delBtn.className = 'btn btn-small btn-danger';
-      delBtn.addEventListener('click', () => {
-        liens.splice(idx, 1);
-        save();
-        render();
-      });
-
-      right.appendChild(editBtn);
-      right.appendChild(delBtn);
-      row.appendChild(left);
-      row.appendChild(right);
-      listEl.appendChild(row);
+function setupCurrencyInputs() {
+    const currencyInputs = document.querySelectorAll('input[name="arv"], input[name="rehab"], input[name="closing_costs"]');
+    currencyInputs.forEach(input => {
+        // Format on blur
+        input.addEventListener('blur', function() {
+            let value = this.value.replace(/[^0-9.]/g, '');
+            if (value) {
+                const num = parseFloat(value);
+                if (!isNaN(num)) {
+                    this.value = '$' + num.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+                    this.dataset.rawValue = num;
+                }
+            }
+        });
+        // Clear formatting on focus
+        input.addEventListener('focus', function() {
+            let value = this.value.replace(/[^0-9.]/g, '');
+            if (value) {
+                this.value = value;
+            }
+        });
+        // Format existing values on load
+        if (input.value && !input.value.startsWith('$')) {
+            const num = parseFloat(input.value);
+            if (!isNaN(num) && num > 0) {
+                input.value = '$' + num.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+                input.dataset.rawValue = num;
+            }
+        }
     });
+    
+    // Before form submit, convert back to numbers
+    document.querySelectorAll('form').forEach(form => {
+        form.addEventListener('submit', function() {
+            currencyInputs.forEach(input => {
+                if (input.form === form) {
+                    input.value = input.value.replace(/[^0-9.]/g, '');
+                }
+            });
+        });
+    });
+}
 
-    // Update summary numbers on the fly
-    updateSummaryFromLiens();
-  }
+// ============ LIEN MANAGEMENT ============
+const CASE_ID = {{ case.id }};
+let liens = [];
 
-  function setSaving(isSaving) {
-    if (!savingEl) return;
-    savingEl.style.display = isSaving ? 'block' : 'none';
-  }
-
-  async function load() {
+async function loadLiens() {
     try {
-      const resp = await fetch(`/cases/${caseId}/liens`);
-      if (!resp.ok) throw new Error('Failed to load liens');
-      const data = await resp.json();
-      liens = Array.isArray(data) ? data : [];
-      render();
-    } catch (err) {
-      console.error(err);
+        const resp = await fetch(`/cases/${CASE_ID}/liens`);
+        if (!resp.ok) {
+            console.error('Failed to load liens, status:', resp.status);
+            liens = [];
+            renderLiens();
+            return;
+        }
+        const data = await resp.json();
+        // Clean to only holder and amount
+        liens = Array.isArray(data) ? data.map(l => ({
+            holder: l.holder || '',
+            amount: l.amount || ''
+        })) : [];
+        console.log('Loaded liens:', liens);
+        renderLiens();
+    } catch (e) {
+        console.error('Error loading liens:', e);
+        liens = [];
+        renderLiens();
     }
-  }
-
-  async function save() {
-  setSaving(true);
-  try {
-    const resp = await fetch(`/cases/${caseId}/liens`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      // IMPORTANT: backend expects { outstanding_liens: [...] }
-      body: JSON.stringify({ outstanding_liens: liens }),
-    });
-
-    if (!resp.ok) {
-      console.error('Failed to save liens', resp.status);
-      return;
-    }
-
-    // Optional: sync local liens with what the API returns
-    const data = await resp.json();
-    liens = Array.isArray(data) ? data : [];
-    render();
-  } catch (err) {
-    console.error(err);
-  } finally {
-    setSaving(false);
-  }
 }
 
-
-  function openModalForNew() {
-    if (!modal) return;
-    indexInput.value = '';
-    holderInput.value = '';
-    amountInput.value = '';
-    modal.style.display = 'block';
-  }
-
-  function openModalForEdit(idx) {
-    if (!modal) return;
-    const lien = liens[idx];
-    indexInput.value = String(idx);
-    holderInput.value = lien.holder || '';
-    amountInput.value = lien.amount || '';
-    modal.style.display = 'block';
-  }
-
-  function closeModal() {
-    if (!modal) return;
-    modal.style.display = 'none';
-  }
-
-  function init() {
-    if (!listEl || !modal || !form) return;
-
-    openBtn && openBtn.addEventListener('click', () => openModalForNew());
-    closeBtn && closeBtn.addEventListener('click', closeModal);
-    cancelBtn && cancelBtn.addEventListener('click', closeModal);
-
-    form.addEventListener('submit', (evt) => {
-      evt.preventDefault();
-      const holder = holderInput.value.trim();
-      const amount = amountInput.value.trim();
-      if (!holder || !amount) {
-        alert('Please enter both holder and amount.');
+function renderLiens() {
+    const container = document.getElementById('liens-list');
+    if (!container) return;
+    
+    if (!liens || liens.length === 0) {
+        container.innerHTML = '<div class="liens-empty-hint" style="padding: 16px; text-align: center; color: var(--text-muted);">No liens added yet.</div>';
         return;
-      }
-      const idx = indexInput.value ? parseInt(indexInput.value, 10) : -1;
-      if (idx >= 0 && idx < liens.length) {
-        liens[idx].holder = holder;
-        liens[idx].amount = amount;
-      } else {
-        liens.push({ holder, amount });
-      }
-      modal.style.display = 'none';
-      save();
-      render();
-    });
-
-    window.addEventListener('click', (evt) => {
-      if (evt.target === modal) {
-        closeModal();
-      }
-    });
-  }
-
-  function updateSummaryFromLiens() {
-    const totalEl = document.getElementById('summary-liens-total');
-    const sellerEl = document.getElementById('summary-seller-cash');
-    const wholesaleEl = document.getElementById('summary-wholesale-offer-raw');
-    const flipEl = document.getElementById('summary-flip-offer-raw');
-
-    if (!totalEl && !sellerEl) return;
-
+    }
+    
     let total = 0;
-    if (Array.isArray(liens)) {
-      liens.forEach(l => {
-        const raw = (l.amount || '').toString().replace(/[^\d.]/g, '');
-        const num = parseFloat(raw);
-        if (!isNaN(num)) total += num;
-      });
-    }
-
-    const arv = {{ arv|float }};
-    const rehab = {{ rehab|float }};
-    const closingLocal = {{ closing|float }};
-    const wholesaleOffer = Math.max(0, (arv * 0.65) - rehab - closingLocal);
-    const flipRate = arv > 350000 ? 0.85 : 0.80;
-    const flipOffer = Math.max(0, (arv * flipRate) - rehab - closingLocal);
-    const sellerCash = Math.max(0, wholesaleOffer - total);
-
-    if (totalEl) totalEl.textContent = total.toLocaleString('en-US', { style:'currency', currency:'USD' });
-    if (wholesaleEl) wholesaleEl.textContent = wholesaleOffer.toLocaleString('en-US', { style:'currency', currency:'USD' });
-    if (flipEl) flipEl.textContent = flipOffer.toLocaleString('en-US', { style:'currency', currency:'USD' });
-    if (sellerEl) sellerEl.textContent = sellerCash.toLocaleString('en-US', { style:'currency', currency:'USD' });
-  }
-
-  load();
-  init();
-})();
-
-// Tab switching for Case Overview / Property Data
-(function () {
-  const tabButtons = document.querySelectorAll('.tab-button');
-  const tabPanels = document.querySelectorAll('.tab-content');
-  if (!tabButtons.length || !tabPanels.length) return;
-
-  tabButtons.forEach(btn => {
-    btn.addEventListener('click', () => {
-      const tab = btn.getAttribute('data-tab');
-      tabButtons.forEach(b => b.classList.remove('tab-active'));
-      tabPanels.forEach(p => p.classList.remove('tab-active'));
-      btn.classList.add('tab-active');
-      const panel = document.getElementById('tab-' + tab);
-      if (panel) {
-        panel.classList.add('tab-active');
-      }
-    });
-  });
-})();
-
-// Update rehab placeholder when condition changes (case overview tab)
-(function () {
-  const rehabInput = document.getElementById('rehab-input');
-  if (!rehabInput) return;
-  const conditionInputs = document.querySelectorAll('input[name="rehab_condition"]');
-  const yearInput = document.querySelector('#propertyEdit input[name="year_built"]');
-  const sqftInput = document.querySelector('#propertyEdit input[name="sqft"]');
-
-  function toFloat(val) {
-    if (val === null || val === undefined) return null;
-    const s = String(val).replace(/[^0-9.]/g, '').trim();
-    if (!s) return null;
-    const num = parseFloat(s);
-    return Number.isNaN(num) ? null : num;
-  }
-
-  function currentCondition() {
-    const checked = document.querySelector('input[name="rehab_condition"]:checked');
-    return checked ? checked.value : 'Good';
-  }
-
-  function estimateRehab() {
-    const year =
-      toFloat(yearInput && yearInput.value) ?? toFloat(rehabInput.dataset.yearBuilt);
-    const sqft =
-      toFloat(sqftInput && sqftInput.value) ?? toFloat(rehabInput.dataset.sqft);
-    if (!year || !sqft || sqft <= 0) {
-      return;
-    }
-
-    let base = 20.0;
-    if (year < 1960) base = 50.0;
-    else if (year <= 1989) base = 40.0;
-    else if (year <= 2009) base = 35.0;
-    else if (year <= 2020) base = 30.0;
-    else base = 20.0;
-
-    const mults = { poor: 1.0, fair: 0.75, good: 0.60, excellent: 0.50 };
-    const cond = currentCondition().toLowerCase();
-    const mult = mults[cond] ?? 0.60;
-
-    let estimate = base * sqft * mult;
-    estimate = Math.max(12000, Math.min(120000, estimate));
-    rehabInput.placeholder = `Suggested Rehab $${estimate.toFixed(2)}`;
-  }
-
-  conditionInputs.forEach((el) => el.addEventListener('change', estimateRehab));
-  if (yearInput) yearInput.addEventListener('input', estimateRehab);
-  if (sqftInput) sqftInput.addEventListener('input', estimateRehab);
-  estimateRehab();
-})();
-
-// Update closing costs placeholder when ARV changes (case overview tab)
-(function () {
-  const arvInput = document.getElementById('arv-input');
-  const closingInput = document.getElementById('closing-costs-input');
-  if (!arvInput || !closingInput) return;
-
-  function updateClosingPlaceholder() {
-    const val = parseFloat(arvInput.value || '0');
-    if (!val || isNaN(val)) {
-      closingInput.placeholder = 'Suggested Closing Costs $0.00';
-      return;
-    }
-    const suggested = (val * 0.015).toFixed(2);
-    closingInput.placeholder = `Suggested Closing Costs $${suggested}`;
-  }
-
-  arvInput.addEventListener('input', updateClosingPlaceholder);
-  updateClosingPlaceholder();
-})();
-
-// Disable buttons on submit to prevent double-click disasters
-(function(){
-  const forms = document.querySelectorAll('.js-disable-on-submit');
-  forms.forEach(f => {
-    f.addEventListener('submit', () => {
-      const btn = f.querySelector('button[type="submit"]');
-      if (btn) {
-        btn.disabled = true;
-        const old = btn.textContent;
-        btn.textContent = 'Working...';
-        setTimeout(() => { btn.textContent = old; }, 15000);
-      }
-    });
-  });
-})();
-
-</script>
-
-<style>
-/* Layout */
-.addr-photo-liens {
-  display:flex;
-  gap:1.5rem;
-  margin:1rem 0 1.5rem;
-}
-.addr-photo-liens .left-col {
-  flex: 1.2;
-  min-width: 0;
-}
-.addr-photo-liens .right-col {
-  flex: 1;
-  min-width: 260px;
-}
-
-/* Address / parcel line */
-.address-line {
-  font-size:1.1rem;
-  margin-bottom:0.25rem;
-}
-.property-inline {
-  margin:0.4rem 0 0.6rem;
-  font-size:0.95rem;
-}
-.inline-edit-link {
-  font-size:0.85rem;
-  margin-left:0.5rem;
-  text-decoration:underline;
-  cursor:pointer;
-}
-
-/* Street View */
-.streetview-container {
-  border-radius:10px;
-  overflow:hidden;
-  border:1px solid #333;
-  background:#111;
-  min-height:180px;
-}
-.streetview-img {
-  width:100%;
-  display:block;
-}
-.streetview-placeholder {
-  padding:1.5rem;
-  text-align:center;
-  opacity:0.7;
-}
-
-/* Liens + numbers */
-.liens-panel {
-  background:#141414;
-  border-radius:10px;
-  padding:0.75rem 1rem;
-  margin-bottom:1rem;
-  border:1px solid #2c2c2c;
-}
-.liens-header-row {
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  margin-bottom:0.5rem;
-}
-.liens-header {
-  font-weight:600;
-  font-size:0.95rem;
-}
-.lien-link {
-  font-size:0.85rem;
-  cursor:pointer;
-  text-decoration:underline;
-  color:#8fd4ff;
-}
-.liens-empty-hint {
-  font-size:0.9rem;
-  opacity:0.7;
-}
-.lien-row {
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  padding:0.35rem 0;
-  border-top:1px dashed #333;
-}
-.lien-row:first-of-type {
-  border-top:none;
-}
-.lien-left {
-  font-size:0.9rem;
-}
-.lien-actions {
-  display:flex;
-  gap:0.25rem;
-}
-.btn-small {
-  font-size:0.75rem;
-  padding:0.15rem 0.4rem;
-}
-.btn-danger {
-  background:#5a1f1f;
-}
-
-/* Numbers section */
-.numbers-section {
-  background:#121212;
-  border-radius:10px;
-  padding:0.75rem 1rem 1rem;
-  border:1px solid #2c2c2c;
-}
-.numbers-section h3 {
-  margin-top:0;
-}
-.numbers-section input[type="number"] {
-  width:100%;
-  margin-bottom:0.4rem;
-}
-.numbers-section select {
-  width:100%;
-  margin-bottom:0.4rem;
-  background:#121212;
-  color:#eaeaea;
-  border:1px solid #2c2c2c;
-}
-.condition-group {
-  display:flex;
-  gap:0.6rem;
-  flex-wrap:wrap;
-  margin:0.2rem 0 0.6rem;
-}
-.condition-option {
-  display:flex;
-  align-items:center;
-  gap:0.35rem;
-  font-size:0.9rem;
-}
-.condition-option input[type="radio"] {
-  accent-color:#8fd4ff;
-}
-
-/* Liens modal */
-.lien-modal {
-  display:none;
-  position:fixed;
-  z-index:999;
-  left:0;
-  top:0;
-  width:100%;
-  height:100%;
-  overflow:auto;
-  background:rgba(0,0,0,0.6);
-}
-.lien-modal-content {
-  background:#1c1c1c;
-  margin:10% auto;
-  padding:1rem;
-  width:95%;
-  max-width:400px;
-  border-radius:10px;
-  border:1px solid #3a3a3a;
-}
-.lien-modal-header {
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  margin-bottom:0.5rem;
-}
-.lien-close {
-  cursor:pointer;
-  font-size:1.2rem;
-}
-.lien-modal-actions {
-  display:flex;
-  justify-content:flex-end;
-  gap:0.5rem;
-  margin-top:0.75rem;
-}
-
-/* Defendants, skip trace, documents, notes */
-.defendants-section,
-.skip-trace-section,
-.documents-section,
-.notes-section {
-  margin-top:1.25rem;
-}
-.defendants-section ul,
-.notes-list {
-  list-style:none;
-  padding-left:0;
-}
-
-/* Notes */
-.notes-section .note-form textarea {
-  width:100%;
-  margin-bottom:0.5rem;
-}
-.notes-list li {
-  border-bottom:1px solid #333;
-  padding:0.3rem 0;
-}
-  .note-date {
-    font-size:0.8rem;
-    opacity:0.7;
-    margin-right:0.5rem;
-  }
-  .note-delete {
-    font-size:0.8rem;
-    opacity:0.7;
-    margin-right:0.5rem;
-    color:#b8c0c7;
-    text-decoration:none;
-  }
-  .note-delete:hover {
-    opacity:0.9;
-    text-decoration:underline;
-  }
-  .note-text {
-    font-size:0.9rem;
-  }
-  .pasco-links {
-    margin: 6px 0 14px 0;
-    font-size: 0.9rem;
-  }
-  .pasco-links a {
-    color: var(--acc);
-    text-decoration: none;
-  }
-  .pasco-links a:hover {
-    text-decoration: underline;
-  }
-  .pasco-links-divider {
-    margin: 0 6px;
-    color: #6c6c6c;
-  }
-
-/* Tabs */
-.tabs {
-  margin-top:1rem;
-}
-.tab-button {
-  padding:0.3rem 0.7rem;
-  font-size:0.9rem;
-  border:1px solid #333;
-  border-bottom:none;
-  background:#1b1b1b;
-  color:#eaeaea;
-  cursor:pointer;
-  margin-right:0.4rem;
-  border-radius:6px 6px 0 0;
-}
-.tab-button.tab-active {
-  background:#2b2b2b;
-  color:#fff;
-  font-weight:600;
-}
-.tab-content {
-  display:none;
-  border:1px solid #333;
-  padding:1rem;
-  border-radius:0 6px 6px 6px;
-  margin-top:-1px;
-  background:#0f0f0f;
-  color:#eaeaea;
-}
-.tab-content {
-    display: none;
-}
-
-.tab-content.active {
-    display: block;
-}
-
-/* Property tab cards */
-.property-tab .prop-grid {
-  display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
-  gap:1rem;
-}
-.prop-card {
-  background:#151515;
-  border-radius:10px;
-  padding:0.75rem 1rem;
-  border:1px solid #2b2b2b;
-}
-.prop-card h4 {
-  margin-top:0;
-}
-
-/* Pills for quick flags */
-.pill {
-  display:inline-block;
-  padding:0.1rem 0.4rem;
-  border-radius:999px;
-  font-size:0.75rem;
-  margin-right:0.25rem;
-  margin-bottom:0.25rem;
-}
-.pill-tag {
-  background: #1f3d2e;
-  color: #a6f3c5;
-}
-.pill-warn {
-  background: #412222;
-  color: #ffb3b3;
-}
-
-.property-error {
-  color: #ff8080;
-  font-size: 0.95rem;
-}
-.docs-notes-row {
-  display: flex;
-  gap: 1.5rem;
-  margin-top: 1.25rem;
-  align-items: flex-start;
-}
-
-.docs-notes-row .documents-section,
-.docs-notes-row .notes-section {
-  flex: 1;
-}
-
-/* Optional: stack on small screens */
-@media (max-width: 900px) {
-  .docs-notes-row {
-    flex-direction: column;
-  }
-}
-/* Skip trace */
-.skip-trace-list {
-  list-style: none;
-  padding-left: 0;
-  margin-top: 0.5rem;
-}
-.skip-trace-item {
-  padding: 4px 0;
-  border-bottom: 1px solid #eee;
-}
-.skip-phone-line,
-.skip-email-line {
-  margin-top: 2px;
-}
-
-/* Yes/No icons */
-.yn-icon {
-  font-weight: bold;
-}
-.yn-icon.yes {
-  color: #28a745; /* green check */
-}
-.yn-icon.no {
-  color: #dc3545; /* red X */
-}
-
-</style>
-
-<script>
-function openTab(evt, tabName) {
-    // Hide all tab contents
-    var tabContents = document.querySelectorAll('.tab-content');
-    tabContents.forEach(function(content) {
-        content.classList.remove('active');
-        content.style.display = 'none';
+    let html = '';
+    liens.forEach((lien, idx) => {
+        // Handle amount as string or number
+        const rawAmt = (lien.amount || '').toString().replace(/[^0-9.]/g, '');
+        const amt = parseFloat(rawAmt) || 0;
+        total += amt;
+        html += `
+            <div class="lien-item">
+                <div>
+                    <div style="font-weight: 500;">${escapeHtml(lien.holder || 'Unknown')}</div>
+                    <div style="font-size: 13px; color: var(--text-muted);">Lien #${idx + 1}</div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <span class="lien-amount">${formatCurrency(amt)}</span>
+                    <button class="btn btn-ghost btn-sm" onclick="editLien(${idx})">Edit</button>
+                    <button class="btn btn-ghost btn-sm" style="color: var(--danger);" onclick="deleteLien(${idx})">×</button>
+                </div>
+            </div>
+        `;
     });
     
-    // Remove active class from all buttons
-    var tabButtons = document.querySelectorAll('.tab-button');
-    tabButtons.forEach(function(button) {
-        button.classList.remove('active');
-    });
+    html += `
+        <div style="padding: 12px; background: var(--bg-alt); border-radius: var(--radius-md); margin-top: 8px; display: flex; justify-content: space-between;">
+            <strong>Total Liens:</strong>
+            <strong style="color: var(--danger);">${formatCurrency(total)}</strong>
+        </div>
+    `;
     
-    // Show the selected tab
-    var selectedTab = document.getElementById('tab-' + tabName);
-    if (selectedTab) {
-        selectedTab.style.display = 'block';
-        selectedTab.classList.add('active');
+    container.innerHTML = html;
+    
+    // Update summary if exists
+    const totalEl = document.getElementById('summary-liens-total');
+    if (totalEl) totalEl.textContent = formatCurrency(total);
+}
+
+function formatCurrency(amount) {
+    return '$' + amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function openLienModal(idx = null) {
+    const modal = document.getElementById('lienModal');
+    const title = document.getElementById('lienModalTitle');
+    const indexField = document.getElementById('lienIndex');
+    const holderField = document.getElementById('lienHolder');
+    const amountField = document.getElementById('lienAmount');
+    
+    if (idx !== null && liens[idx]) {
+        title.textContent = 'Edit Lien';
+        indexField.value = idx;
+        holderField.value = liens[idx].holder || '';
+        amountField.value = liens[idx].amount || '';
+    } else {
+        title.textContent = 'Add Lien';
+        indexField.value = '';
+        holderField.value = '';
+        amountField.value = '';
     }
     
-    // Mark button as active
-    if (evt && evt.currentTarget) {
-        evt.currentTarget.classList.add('active');
+    modal.classList.add('show');
+}
+
+function closeLienModal() {
+    document.getElementById('lienModal').classList.remove('show');
+}
+
+function editLien(idx) {
+    openLienModal(idx);
+}
+
+async function deleteLien(idx) {
+    if (!confirm('Delete this lien?')) return;
+    
+    // Remove from local array
+    liens.splice(idx, 1);
+    
+    // Save to server (this will reload and re-render)
+    const success = await saveLiens();
+    if (success) {
+        showToast('Lien deleted', 'success');
+    } else {
+        // Reload to get original state back
+        await loadLiens();
     }
 }
+
+async function saveLiens() {
+    const saving = document.getElementById('liens-saving');
+    if (saving) saving.style.display = 'block';
+    
+    try {
+        // Clean liens to only include holder and amount (as strings)
+        const cleanLiens = liens.map(l => ({
+            holder: String(l.holder || ''),
+            amount: String(l.amount || '')
+        }));
+        
+        console.log('Saving liens:', JSON.stringify({ outstanding_liens: cleanLiens }));
+        
+        const resp = await fetch(`/cases/${CASE_ID}/liens`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ outstanding_liens: cleanLiens })
+        });
+        
+        if (!resp.ok) {
+            const errorText = await resp.text();
+            console.error('Failed to save liens, status:', resp.status, 'response:', errorText);
+            showToast('Failed to save liens', 'error');
+            return false;
+        }
+        
+        // Reload from server to get the saved state
+        await loadLiens();
+        return true;
+    } catch (e) {
+        console.error('Error saving liens:', e);
+        showToast('Error saving liens: ' + e.message, 'error');
+        return false;
+    } finally {
+        if (saving) saving.style.display = 'none';
+    }
+}
+
+// Simple toast notification
+function showToast(message, type = 'success') {
+    const existing = document.querySelector('.toast-notification');
+    if (existing) existing.remove();
+    
+    const toast = document.createElement('div');
+    toast.className = 'toast-notification ' + type;
+    toast.textContent = message;
+    toast.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        padding: 12px 20px;
+        border-radius: 8px;
+        color: white;
+        font-size: 14px;
+        z-index: 10000;
+        animation: slideIn 0.3s ease;
+        background: ${type === 'error' ? '#ef4444' : '#10b981'};
+    `;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 4000);
+}
+
+// Modal event listeners
+document.getElementById('lien-modal-open')?.addEventListener('click', () => openLienModal());
+document.getElementById('lienModalClose')?.addEventListener('click', closeLienModal);
+document.getElementById('lienModalCancel')?.addEventListener('click', closeLienModal);
+
+document.getElementById('lienModalForm')?.addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const idx = document.getElementById('lienIndex').value;
+    const holder = document.getElementById('lienHolder').value.trim();
+    const amount = document.getElementById('lienAmount').value.trim();
+    
+    if (!holder || !amount) {
+        showToast('Please enter both holder and amount', 'error');
+        return;
+    }
+    
+    const lienData = { holder, amount };
+    
+    // Update local array
+    if (idx !== '') {
+        liens[parseInt(idx)] = lienData;
+    } else {
+        liens.push(lienData);
+    }
+    
+    // Save to server (this will also reload and re-render)
+    const success = await saveLiens();
+    if (success) {
+        showToast('Lien saved successfully!', 'success');
+        closeLienModal();
+    } else {
+        // Reload to get original state back
+        await loadLiens();
+    }
+});
+
+// Close modal on backdrop click
+document.getElementById('lienModal')?.addEventListener('click', function(e) {
+    if (e.target === this) closeLienModal();
+});
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
-    // Show overview tab by default
-    openTab(null, 'overview');
-    
-    // Make first tab button active
-    var firstButton = document.querySelector('.tab-button');
-    if (firstButton) {
-        firstButton.classList.add('active');
-    }
+    loadLiens();
+    setupCurrencyInputs();
 });
 </script>
-<script>
-(function () {
-  function disableForm(form) {
-    const btns = form.querySelectorAll('button, input[type="submit"]');
-    btns.forEach(b => {
-      if (b.dataset.originalText === undefined && b.tagName.toLowerCase() === 'button') {
-        b.dataset.originalText = b.innerHTML;
-      }
-      b.disabled = true;
-      b.classList.add('disabled');
-      if (b.tagName.toLowerCase() === 'button') {
-        b.innerHTML = (b.dataset.loadingText || 'Working…');
-      }
-    });
-  }
-
-  document.querySelectorAll('form.js-disable-on-submit').forEach(form => {
-    form.addEventListener('submit', function () {
-      disableForm(form);
-    });
-  });
-})();
-</script>
-
 {% endblock %}

@@ -1,0 +1,247 @@
+{% extends "base.html" %}
+{% block title %}Analytics Dashboard - JSN Holdings{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
+    <div>
+        <h1 class="page-title">Analytics Dashboard</h1>
+        <p class="page-subtitle">Real-time insights into your foreclosure pipeline.</p>
+    </div>
+    <button class="btn btn-secondary" onclick="location.reload()">↻ Refresh</button>
+</div>
+
+<!-- Quick Stats -->
+<div class="stats-grid" style="grid-template-columns: repeat(4, 1fr);">
+    <div class="stat-card">
+        <div class="stat-icon purple">📊</div>
+        <div class="stat-value" id="stat-total-deals">—</div>
+        <div class="stat-label">Total Deals</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon green">⭐</div>
+        <div class="stat-value" id="stat-excellent">—</div>
+        <div class="stat-label">Excellent Deals</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon blue">👍</div>
+        <div class="stat-value" id="stat-good">—</div>
+        <div class="stat-label">Good Deals</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon orange">📈</div>
+        <div class="stat-value" id="stat-avg-score">—</div>
+        <div class="stat-label">Avg Score</div>
+    </div>
+</div>
+
+<!-- Key Metrics -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-icon purple">📁</div>
+        <div class="stat-value">{{ metrics.total_cases | default(0) }}</div>
+        <div class="stat-label">Total Cases</div>
+        <div class="stat-change positive">+{{ metrics.new_cases_30d | default(0) }} this month</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon green">🎯</div>
+        <div class="stat-value">{{ metrics.active_cases | default(0) }}</div>
+        <div class="stat-label">Active Pipeline</div>
+        <div class="stat-change">{{ metrics.high_value_count | default(0) }} high-value</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon blue">💰</div>
+        <div class="stat-value">${{ "{:,.0f}".format(metrics.avg_arv | default(0)) }}</div>
+        <div class="stat-label">Average ARV</div>
+        <div class="stat-change">${{ "{:,.0f}".format(metrics.avg_rehab | default(0)) }} avg rehab</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon green">📈</div>
+        <div class="stat-value">${{ "{:,.0f}".format(metrics.total_potential_profit | default(0)) }}</div>
+        <div class="stat-label">Pipeline Value</div>
+        <div class="stat-change positive">Total potential profit</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon orange">⚠️</div>
+        <div class="stat-value">{{ metrics.short_sale_count | default(0) }}</div>
+        <div class="stat-label">Short Sales</div>
+        <div class="stat-change">Liens exceed offer</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon purple">🏠</div>
+        <div class="stat-value">{{ metrics.owner_occupied_count | default(0) }}</div>
+        <div class="stat-label">Owner Occupied</div>
+        <div class="stat-change positive">{{ metrics.high_equity_count | default(0) }} high equity</div>
+    </div>
+</div>
+
+<!-- Charts Section -->
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px;">
+    <div class="card">
+        <div class="card-header"><h3 class="card-title">Deal Score Distribution</h3></div>
+        <div class="card-body">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: center;">
+                <div style="height: 200px;"><canvas id="scoreDistributionChart"></canvas></div>
+                <div style="display: flex; flex-direction: column; gap: 12px;">
+                    <div style="display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: var(--success-light); border-radius: 8px;">
+                        <span style="width: 12px; height: 12px; border-radius: 50%; background: var(--success);"></span>
+                        <span style="flex: 1; font-size: 14px;">Excellent (80-100)</span>
+                        <span style="font-weight: 700; color: var(--success);" id="legend-excellent">0</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: var(--info-light); border-radius: 8px;">
+                        <span style="width: 12px; height: 12px; border-radius: 50%; background: var(--info);"></span>
+                        <span style="flex: 1; font-size: 14px;">Good (60-79)</span>
+                        <span style="font-weight: 700; color: var(--info);" id="legend-good">0</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: var(--warning-light); border-radius: 8px;">
+                        <span style="width: 12px; height: 12px; border-radius: 50%; background: var(--warning);"></span>
+                        <span style="flex: 1; font-size: 14px;">Fair (40-59)</span>
+                        <span style="font-weight: 700; color: #b45309;" id="legend-fair">0</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: var(--danger-light); border-radius: 8px;">
+                        <span style="width: 12px; height: 12px; border-radius: 50%; background: var(--danger);"></span>
+                        <span style="flex: 1; font-size: 14px;">Poor (0-39)</span>
+                        <span style="font-weight: 700; color: var(--danger);" id="legend-poor">0</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-header"><h3 class="card-title">Pipeline Value by Status</h3></div>
+        <div class="card-body"><div style="height: 200px;"><canvas id="pipelineChart"></canvas></div></div>
+    </div>
+</div>
+
+<!-- Conversion Funnel -->
+{% if funnel %}
+<div class="card" style="margin-bottom: 24px;">
+    <div class="card-header"><h3 class="card-title">Deal Pipeline Funnel</h3></div>
+    <div class="card-body">
+        <div style="display: flex; gap: 8px; align-items: center;">
+            <div style="flex: 1; text-align: center; padding: 20px; background: var(--bg-alt); border-radius: 8px;">
+                <div style="font-size: 28px; font-weight: 700;">{{ funnel.total_leads }}</div>
+                <div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; margin-top: 4px;">Total Leads</div>
+            </div>
+            <div style="color: var(--text-muted); font-size: 20px;">→</div>
+            <div style="flex: 1; text-align: center; padding: 20px; background: var(--bg-alt); border-radius: 8px;">
+                <div style="font-size: 28px; font-weight: 700;">{{ funnel.contacted }}</div>
+                <div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; margin-top: 4px;">Contacted</div>
+                <div style="font-size: 12px; color: var(--success); margin-top: 4px;">{{ funnel.contact_rate | default(0) }}%</div>
+            </div>
+            <div style="color: var(--text-muted); font-size: 20px;">→</div>
+            <div style="flex: 1; text-align: center; padding: 20px; background: var(--bg-alt); border-radius: 8px;">
+                <div style="font-size: 28px; font-weight: 700;">{{ funnel.offer_sent }}</div>
+                <div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; margin-top: 4px;">Offers Sent</div>
+                <div style="font-size: 12px; color: var(--success); margin-top: 4px;">{{ funnel.offer_rate | default(0) }}%</div>
+            </div>
+            <div style="color: var(--text-muted); font-size: 20px;">→</div>
+            <div style="flex: 1; text-align: center; padding: 20px; background: var(--bg-alt); border-radius: 8px;">
+                <div style="font-size: 28px; font-weight: 700;">{{ funnel.offer_accepted }}</div>
+                <div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; margin-top: 4px;">Accepted</div>
+            </div>
+            <div style="color: var(--text-muted); font-size: 20px;">→</div>
+            <div style="flex: 1; text-align: center; padding: 20px; background: var(--success-light); border-radius: 8px;">
+                <div style="font-size: 28px; font-weight: 700; color: var(--success);">{{ funnel.closed_won }}</div>
+                <div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; margin-top: 4px;">Closed Won</div>
+                <div style="font-size: 12px; color: var(--success); margin-top: 4px;">{{ funnel.close_rate | default(0) }}%</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Top Deals -->
+<div class="card" style="margin-bottom: 24px;">
+    <div class="card-header">
+        <h3 class="card-title">🔥 Top Scoring Deals</h3>
+        <a href="/cases" class="btn btn-secondary btn-sm">View All</a>
+    </div>
+    <div class="card-body" id="top-deals-container">
+        <div style="display: flex; align-items: center; justify-content: center; gap: 8px; padding: 32px; color: var(--text-muted);">
+            <div class="spinner"></div><span>Loading top deals...</span>
+        </div>
+    </div>
+</div>
+
+<style>.spinner{width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', async function() {
+    try {
+        const distResponse = await fetch('/api/v2/analytics/deal-distribution');
+        if (distResponse.ok) {
+            const distData = await distResponse.json();
+            document.getElementById('stat-total-deals').textContent = distData.total_analyzed || 0;
+            document.getElementById('stat-excellent').textContent = distData.distribution?.excellent || 0;
+            document.getElementById('stat-good').textContent = distData.distribution?.good || 0;
+            document.getElementById('legend-excellent').textContent = distData.distribution?.excellent || 0;
+            document.getElementById('legend-good').textContent = distData.distribution?.good || 0;
+            document.getElementById('legend-fair').textContent = distData.distribution?.fair || 0;
+            document.getElementById('legend-poor').textContent = distData.distribution?.poor || 0;
+            const total = distData.total_analyzed || 0;
+            if (total > 0) {
+                const avgScore = Math.round((distData.distribution.excellent * 90 + distData.distribution.good * 70 + distData.distribution.fair * 50 + distData.distribution.poor * 20) / total);
+                document.getElementById('stat-avg-score').textContent = avgScore;
+            }
+            const ctx = document.getElementById('scoreDistributionChart');
+            if (ctx) {
+                new Chart(ctx, {type:'doughnut',data:{labels:['Excellent','Good','Fair','Poor'],datasets:[{data:[distData.distribution?.excellent||0,distData.distribution?.good||0,distData.distribution?.fair||0,distData.distribution?.poor||0],backgroundColor:['#10b981','#3b82f6','#f59e0b','#ef4444'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,cutout:'65%',plugins:{legend:{display:false}}}});
+            }
+        }
+    } catch (e) { console.error('Error loading distribution:', e); }
+    
+    try {
+        const container = document.getElementById('top-deals-container');
+        const response = await fetch('/api/v2/cases/top-deals?limit=5&min_score=0');
+        
+        if (response.ok) {
+            const data = await response.json();
+            const deals = data.top_deals || [];
+            
+            if (deals && deals.length > 0) {
+                let html = '<table class="table" style="margin:0;"><thead><tr><th>Case #</th><th>Score</th><th>Max Offer</th><th>Est. Profit</th><th>ROI</th></tr></thead><tbody>';
+                
+                deals.forEach(function(d) {
+                    const caseNum = d.case_number || '—';
+                    const score = d.score || 0;
+                    const metrics = d.metrics || {};
+                    const maxOffer = metrics.max_offer || 0;
+                    const profit = metrics.estimated_profit || 0;
+                    const roi = metrics.roi_pct || 0;
+                    const caseId = d.case_id || d.id;
+                    const scoreClass = d.score_class || getScoreClass(score);
+                    const profitColor = profit >= 0 ? 'var(--success)' : 'var(--danger)';
+                    
+                    html += '<tr onclick="window.location.href=\'/cases/' + caseId + '\'" style="cursor:pointer;">';
+                    html += '<td><strong>' + caseNum + '</strong></td>';
+                    html += '<td><span class="deal-score-badge ' + scoreClass + '">' + score + '</span></td>';
+                    html += '<td>$' + Number(maxOffer).toLocaleString(undefined, {maximumFractionDigits: 0}) + '</td>';
+                    html += '<td style="color:' + profitColor + ';font-weight:600;">$' + Number(profit).toLocaleString(undefined, {maximumFractionDigits: 0}) + '</td>';
+                    html += '<td>' + Number(roi).toFixed(0) + '%</td>';
+                    html += '</tr>';
+                });
+                
+                html += '</tbody></table>';
+                container.innerHTML = html;
+            } else {
+                container.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);">No deals analyzed yet. Set ARV on cases to see them here.</div>';
+            }
+        } else {
+            container.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);">Unable to load deals</div>';
+        }
+    } catch (e) { 
+        console.error('Error loading top deals:', e); 
+        document.getElementById('top-deals-container').innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);">Error loading deals</div>';
+    }
+    
+    const pipelineCtx = document.getElementById('pipelineChart');
+    if (pipelineCtx) {
+        const profit = {{ metrics.total_potential_profit | default(0) }};
+        new Chart(pipelineCtx, {type:'bar',data:{labels:['New','Contacted','Offer Sent','Negotiating','Closed'],datasets:[{label:'Pipeline Value ($)',data:[profit*0.4,profit*0.25,profit*0.20,profit*0.10,profit*0.05],backgroundColor:['#667eea','#764ba2','#3b82f6','#10b981','#f59e0b'],borderRadius:6}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,grid:{color:'rgba(0,0,0,0.05)'},ticks:{color:'#64748b',callback:function(v){return '$'+v.toLocaleString();}}},x:{grid:{display:false},ticks:{color:'#64748b'}}}}});
+    }
+});
+function getScoreClass(score){if(score>=80)return'excellent';if(score>=60)return'good';if(score>=40)return'fair';return'poor';}
+</script>
+{% endblock %}

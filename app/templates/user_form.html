@@ -1,67 +1,57 @@
 {% extends "base.html" %}
-{% block content %}
+{% block title %}{% if user %}Edit User{% else %}Create User{% endif %} - JSN Holdings{% endblock %}
 
-<h2>{% if user %}Edit User{% else %}Create New User{% endif %}</h2>
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">{% if user %}Edit User{% else %}Create New User{% endif %}</h1>
+    <p class="page-subtitle">{% if user %}Update user account information.{% else %}Add a new user to the system.{% endif %}</p>
+</div>
 
 {% if error %}
-<div class="error" style="background: #fee; color: #c33; padding: 12px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #c33;">
-    {{ error }}
-</div>
+<div class="alert alert-danger">{{ error }}</div>
 {% endif %}
 
-<form method="post" action="/users/create" style="max-width: 600px;">
-    <div class="form-group" style="margin-bottom: 20px;">
-        <label>Username *</label>
-        <input type="text" name="username" value="{{ user.username if user else '' }}" required>
+<div class="card" style="max-width: 600px;">
+    <div class="card-body">
+        <form method="post" action="/users/create">
+            <div class="form-group">
+                <label class="form-label">Username *</label>
+                <input type="text" name="username" value="{{ user.username if user else '' }}" required class="form-control">
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">Email *</label>
+                <input type="email" name="email" value="{{ user.email if user else '' }}" required class="form-control">
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">Full Name</label>
+                <input type="text" name="full_name" value="{{ user.full_name if user else '' }}" class="form-control">
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">Password *</label>
+                <input type="password" name="password" required minlength="8" placeholder="Minimum 8 characters" class="form-control">
+                <span class="form-hint">Must be at least 8 characters long.</span>
+            </div>
+            
+            <div class="form-group">
+                <label style="display: flex; align-items: center; gap: var(--space-sm); cursor: pointer; padding: var(--space-md); background: var(--bg-alt); border-radius: var(--radius-md);">
+                    <input type="checkbox" name="is_admin" value="true" 
+                           {% if user and user.is_admin %}checked{% endif %}
+                           style="width: 20px; height: 20px;">
+                    <div>
+                        <div style="font-weight: 600;">Administrator</div>
+                        <div style="font-size: 13px; color: var(--text-secondary); font-weight: 400;">Can manage users and access all data</div>
+                    </div>
+                </label>
+            </div>
+            
+            <div style="display: flex; gap: var(--space-md); padding-top: var(--space-lg); border-top: 1px solid var(--border); margin-top: var(--space-lg);">
+                <button type="submit" class="btn btn-primary">{% if user %}Save Changes{% else %}Create User{% endif %}</button>
+                <a href="/users" class="btn btn-secondary">Cancel</a>
+            </div>
+        </form>
     </div>
-    
-    <div class="form-group" style="margin-bottom: 20px;">
-        <label>Email *</label>
-        <input type="email" name="email" value="{{ user.email if user else '' }}" required>
-    </div>
-    
-    <div class="form-group" style="margin-bottom: 20px;">
-        <label>Full Name</label>
-        <input type="text" name="full_name" value="{{ user.full_name if user else '' }}">
-    </div>
-    
-    <div class="form-group" style="margin-bottom: 20px;">
-        <label>Password *</label>
-        <input type="password" name="password" required minlength="8" 
-               placeholder="Minimum 8 characters">
-        <small style="color: #666; font-size: 0.85em;">Must be at least 8 characters</small>
-    </div>
-    
-    <div class="form-group" style="margin-bottom: 20px;">
-        <label style="display: flex; align-items: center; cursor: pointer;">
-            <input type="checkbox" name="is_admin" value="true" 
-                   {% if user and user.is_admin %}checked{% endif %}
-                   style="width: auto; margin-right: 8px;">
-            <span>Administrator (can manage users and all data)</span>
-        </label>
-    </div>
-    
-    <div style="display: flex; gap: 10px;">
-        <button type="submit" class="btn">Create User</button>
-        <a href="/users" class="btn" style="background: #999; text-decoration: none; display: inline-block; text-align: center;">Cancel</a>
-    </div>
-</form>
-
-<style>
-.form-group label {
-    display: block;
-    margin-bottom: 6px;
-    font-weight: 500;
-}
-.form-group input[type="text"],
-.form-group input[type="email"],
-.form-group input[type="password"] {
-    width: 100%;
-    padding: 10px;
-    border: 1px solid #ddd;
-    border-radius: 6px;
-    font-size: 15px;
-}
-</style>
-
+</div>
 {% endblock %}

@@ -33,7 +33,44 @@ UPLOAD_ROOT = BASE_DIR / "uploads"
 UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 
 
-# ---------------- Formatting helpers ---------------- #
+# ================================================================
+# BUSINESS LOGIC CONSTANTS
+# ================================================================
+
+class OfferCalculationConstants:
+    """Constants for calculating flip offers and determining short sales"""
+    
+    # ARV thresholds
+    HIGH_VALUE_THRESHOLD = 350000  # Properties above this use different flip rate
+    
+    # Offer rate percentages
+    WHOLESALE_OFFER_RATE = 0.65   # 65% for wholesale offers
+    HIGH_VALUE_FLIP_RATE = 0.85   # 85% for properties > $350k
+    STANDARD_FLIP_RATE = 0.80     # 80% for properties <= $350k
+    
+    # Closing costs
+    DEFAULT_CLOSING_COST_RATE = 0.045  # 4.5% of ARV if not specified
+    
+    @classmethod
+    def get_flip_rate(cls, arv: float) -> float:
+        """Get appropriate flip rate based on ARV"""
+        return cls.HIGH_VALUE_FLIP_RATE if arv > cls.HIGH_VALUE_THRESHOLD else cls.STANDARD_FLIP_RATE
+
+
+class ReportFormattingConstants:
+    """Constants for PDF report formatting"""
+    
+    # Note display limits
+    MAX_NOTES_IN_REPORT = 15       # Maximum number of notes to include
+    NOTE_MAX_LENGTH = 220          # Maximum characters before truncation
+    NOTE_PREVIEW_LENGTH = 217      # Length of preview before adding "..."
+    NOTE_FONT_SIZE = 9             # Font size for note text
+    
+    # Content truncation
+    ELLIPSIS = "..."               # Suffix for truncated content
+
+
+# ================================================================
 
 def _fmt_money(raw: Any) -> str:
     if raw is None or raw == "":
@@ -85,16 +122,36 @@ def _report_filename(case_id: int, case_number: Optional[str], short_sale: bool)
 
 
 def _is_short_sale(case: Case) -> bool:
+    """
+    Determine if a case qualifies as a short sale.
+    
+    A short sale occurs when total outstanding liens exceed the flip offer.
+    
+    Args:
+        case: The Case object to evaluate
+        
+    Returns:
+        bool: True if total liens > flip offer (short sale), False otherwise
+    """
     arv_num = _parse_float(getattr(case, "arv", None), 0.0)
     rehab_num = _parse_float(getattr(case, "rehab", None), 0.0)
     closing_raw = getattr(case, "closing_costs", None)
+    
+    # Use user-specified closing costs or calculate default
     try:
         user_closing = float(closing_raw) if closing_raw not in (None, "") else None
     except Exception:
         user_closing = None
-    closing_num = user_closing if user_closing is not None else round(arv_num * 0.045, 2)
+    
+    closing_num = (
+        user_closing if user_closing is not None 
+        else round(arv_num * OfferCalculationConstants.DEFAULT_CLOSING_COST_RATE, 2)
+    )
 
-    flip_rate = 0.85 if arv_num > 350000 else 0.80
+    # Determine flip rate based on ARV threshold
+    flip_rate = OfferCalculationConstants.get_flip_rate(arv_num)
+    
+    # Calculate flip offer
     flip_offer = round(
         max(0.0, (arv_num * flip_rate) - rehab_num - closing_num),
         2,
@@ -102,16 +159,7 @@ def _is_short_sale(case: Case) -> bool:
 
     total_liens = _sum_liens_for_calc(case)
     return total_liens > flip_offer
-    if isinstance(raw, (int, float)):
-        return float(raw)
-    try:
-        s = str(raw).strip()
-        if not s:
-            return default
-        cleaned = s.replace("$", "").replace(",", "")
-        return float(cleaned)
-    except Exception:
-        return default
+
 
 
 def _yn_icon(val: Any) -> str:
@@ -494,19 +542,25 @@ def build_case_report_bytes(
     arv_num = _parse_float(getattr(case, "arv", None), 0.0)
     rehab_num = _parse_float(getattr(case, "rehab", None), 0.0)
 
+    # Calculate closing costs
     closing_raw = getattr(case, "closing_costs", None)
     try:
         user_closing = float(closing_raw) if closing_raw not in (None, "") else None
     except Exception:
         user_closing = None
-    closing_num = user_closing if user_closing is not None else round(arv_num * 0.045, 2)
+    closing_num = (
+        user_closing if user_closing is not None 
+        else round(arv_num * OfferCalculationConstants.DEFAULT_CLOSING_COST_RATE, 2)
+    )
 
     # Wholesale Offer: (ARV * 65%) - Rehab - Closing
     wholesale_offer = round(
-        max(0.0, (arv_num * 0.65) - rehab_num - closing_num),
+        max(0.0, (arv_num * OfferCalculationConstants.WHOLESALE_OFFER_RATE) - rehab_num - closing_num),
         2,
     )
-    flip_rate = 0.85 if arv_num > 350000 else 0.80
+    
+    # Flip Offer: Uses different rate based on ARV threshold
+    flip_rate = OfferCalculationConstants.get_flip_rate(arv_num)
     flip_offer = round(
         max(0.0, (arv_num * flip_rate) - rehab_num - closing_num),
         2,
@@ -872,13 +926,23 @@ def build_case_report_bytes(
     # Notes
     if notes:
         layout.section_title("Notes")
-        for n in notes[:15]:
+        # Limit to maximum notes defined in constants
+        for n in notes[:ReportFormattingConstants.MAX_NOTES_IN_REPORT]:
             created = getattr(n, "created_at", "") or ""
             content = (getattr(n, "content", "") or "").replace("\r", " ").replace("\n", " ")
-            if len(content) > 220:
-                content = content[:217] + "..."
+            
+            # Truncate long notes
+            if len(content) > ReportFormattingConstants.NOTE_MAX_LENGTH:
+                content = (
+                    content[:ReportFormattingConstants.NOTE_PREVIEW_LENGTH] + 
+                    ReportFormattingConstants.ELLIPSIS
+                )
+            
             stamp = f"[{created}] " if created else ""
-            layout.line(f"- {stamp}{content}", size=9)
+            layout.line(
+                f"- {stamp}{content}", 
+                size=ReportFormattingConstants.NOTE_FONT_SIZE
+            )
 
     # Attached Documents
     attached_labels: List[str] = []

@@ -1,10 +1,14 @@
 # app/services/analytics_service.py
-# Fixed version that works with existing database schema
+"""
+Analytics Service - Dashboard metrics and reporting
+✅ WITH COMPREHENSIVE INPUT VALIDATION (Fixed Version)
+✅ SQL INJECTION PREVENTION
+"""
 
 from __future__ import annotations
 
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Union
 from datetime import datetime, timedelta
 from sqlalchemy import text, func
 from app.database import engine, SessionLocal
@@ -13,15 +17,132 @@ from app.models import Case, Note
 logger = logging.getLogger("pascowebapp.analytics")
 
 
+# ========================================
+# VALIDATION FUNCTIONS (NEW)
+# ========================================
+
+def validate_months(months: Union[int, str, float]) -> int:
+    """
+    Validate months parameter for time-based queries
+    
+    Args:
+        months: Number of months (1-120)
+    
+    Returns:
+        Validated integer months value
+    
+    Raises:
+        ValueError: If months is invalid
+    """
+    # Type conversion
+    try:
+        months_int = int(months)
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"months must be a number, got: {months}") from e
+    
+    # Range validation
+    if months_int < 1:
+        raise ValueError(f"months must be at least 1, got: {months_int}")
+    
+    if months_int > 120:  # Max 10 years
+        raise ValueError(f"months cannot exceed 120 (10 years), got: {months_int}")
+    
+    return months_int
+
+
+def validate_days(days: Union[int, str, float]) -> int:
+    """
+    Validate days parameter for time-based queries
+    
+    Args:
+        days: Number of days (1-365)
+    
+    Returns:
+        Validated integer days value
+    
+    Raises:
+        ValueError: If days is invalid
+    """
+    # Type conversion
+    try:
+        days_int = int(days)
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"days must be a number, got: {days}") from e
+    
+    # Range validation
+    if days_int < 1:
+        raise ValueError(f"days must be at least 1, got: {days_int}")
+    
+    if days_int > 365:  # Max 1 year
+        raise ValueError(f"days cannot exceed 365 (1 year), got: {days_int}")
+    
+    return days_int
+
+
+def validate_limit(limit: Union[int, str, float], max_limit: int = 1000) -> int:
+    """
+    Validate limit parameter for query result limits
+    
+    Args:
+        limit: Maximum number of results (1-1000)
+        max_limit: Maximum allowed limit
+    
+    Returns:
+        Validated integer limit value
+    
+    Raises:
+        ValueError: If limit is invalid
+    """
+    # Type conversion
+    try:
+        limit_int = int(limit)
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"limit must be a number, got: {limit}") from e
+    
+    # Range validation
+    if limit_int < 1:
+        raise ValueError(f"limit must be at least 1, got: {limit_int}")
+    
+    if limit_int > max_limit:
+        logger.warning(f"limit {limit_int} exceeds max {max_limit}, capping")
+        limit_int = max_limit
+    
+    return limit_int
+
+
+def safe_divide(numerator: float, denominator: float, default: float = 0.0) -> float:
+    """
+    Safely divide two numbers, avoiding division by zero
+    
+    Args:
+        numerator: Number to divide
+        denominator: Number to divide by
+        default: Value to return if denominator is 0
+    
+    Returns:
+        Result of division or default
+    """
+    if denominator == 0:
+        return default
+    return numerator / denominator
+
+
+# ========================================
+# ANALYTICS FUNCTIONS (WITH VALIDATION)
+# ========================================
+
 def get_dashboard_metrics() -> Dict[str, Any]:
     """
     Calculate key metrics for analytics dashboard
     Works with existing database schema
+    
+    Returns:
+        Dict with various metrics
     """
     db = SessionLocal()
     
     try:
-        metrics = {}
+        metrics: Dict[str, Any] = {}
         
         # === CASE METRICS ===
         
@@ -58,27 +179,27 @@ def get_dashboard_metrics() -> Dict[str, Any]:
             avg_arv = db.query(func.avg(Case.arv)).filter(
                 Case.arv > 0
             ).scalar()
-            metrics["avg_arv"] = round(float(avg_arv), 2) if avg_arv else 0
+            metrics["avg_arv"] = round(float(avg_arv), 2) if avg_arv else 0.0
         except AttributeError:
-            metrics["avg_arv"] = 0
+            metrics["avg_arv"] = 0.0
         
         # Total potential value
         try:
             total_arv = db.query(func.sum(Case.arv)).filter(
                 Case.arv > 0
             ).scalar()
-            metrics["total_arv"] = round(float(total_arv), 2) if total_arv else 0
+            metrics["total_arv"] = round(float(total_arv), 2) if total_arv else 0.0
         except AttributeError:
-            metrics["total_arv"] = 0
+            metrics["total_arv"] = 0.0
         
         # Average rehab cost
         try:
             avg_rehab = db.query(func.avg(Case.rehab)).filter(
                 Case.rehab > 0
             ).scalar()
-            metrics["avg_rehab"] = round(float(avg_rehab), 2) if avg_rehab else 0
+            metrics["avg_rehab"] = round(float(avg_rehab), 2) if avg_rehab else 0.0
         except AttributeError:
-            metrics["avg_rehab"] = 0
+            metrics["avg_rehab"] = 0.0
         
         # Calculate total potential profit
         try:
@@ -92,10 +213,10 @@ def get_dashboard_metrics() -> Dict[str, Any]:
                 if result and result[0]:
                     metrics["total_potential_profit"] = round(float(result[0]), 2)
                 else:
-                    metrics["total_potential_profit"] = 0
+                    metrics["total_potential_profit"] = 0.0
         except Exception as e:
             logger.warning(f"Could not calculate profit: {e}")
-            metrics["total_potential_profit"] = 0
+            metrics["total_potential_profit"] = 0.0
         
         # === PIPELINE METRICS ===
         
@@ -135,7 +256,7 @@ def get_dashboard_metrics() -> Dict[str, Any]:
         
         try:
             with engine.connect() as conn:
-                # Owner occupied - escape the colon by doubling it
+                # Owner occupied
                 result = conn.execute(text("""
                     SELECT COUNT(DISTINCT case_id)
                     FROM case_property
@@ -174,27 +295,49 @@ def get_dashboard_metrics() -> Dict[str, Any]:
 
 
 def get_cases_by_month(months: int = 12) -> List[Dict[str, Any]]:
-    """Get case count by month for charting"""
+    """
+    Get case count by month for charting
+    
+    Args:
+        months: Number of months to include (1-120), default 12
+    
+    Returns:
+        List of dicts with month, count, avg_arv
+    
+    Raises:
+        ValueError: If months parameter is invalid
+    """
+    # ✅ VALIDATE INPUT
+    try:
+        months_validated = validate_months(months)
+    except ValueError as e:
+        logger.error(f"Invalid months parameter: {e}")
+        raise
+    
     try:
         with engine.connect() as conn:
-            result = conn.execute(text(f"""
-                SELECT 
-                    strftime('%Y-%m', filing_datetime) as month,
-                    COUNT(*) as count,
-                    AVG(arv) as avg_arv
-                FROM cases
-                WHERE filing_datetime IS NOT NULL
-                  AND filing_datetime != ''
-                  AND date(filing_datetime) >= date('now', '-{months} months')
-                GROUP BY month
-                ORDER BY month DESC
-            """)).fetchall()
+            # ✅ USE PARAMETERIZED QUERY (prevent SQL injection)
+            result = conn.execute(
+                text("""
+                    SELECT 
+                        strftime('%Y-%m', filing_datetime) as month,
+                        COUNT(*) as count,
+                        AVG(arv) as avg_arv
+                    FROM cases
+                    WHERE filing_datetime IS NOT NULL
+                      AND filing_datetime != ''
+                      AND date(filing_datetime) >= date('now', '-' || :months || ' months')
+                    GROUP BY month
+                    ORDER BY month DESC
+                """),
+                {"months": months_validated}  # ✅ Safe parameter binding
+            ).fetchall()
             
             return [
                 {
                     "month": row[0],
                     "count": int(row[1]),
-                    "avg_arv": round(float(row[2]), 2) if row[2] else 0,
+                    "avg_arv": round(float(row[2]), 2) if row[2] else 0.0,
                 }
                 for row in result
             ]
@@ -204,7 +347,12 @@ def get_cases_by_month(months: int = 12) -> List[Dict[str, Any]]:
 
 
 def get_cases_by_county() -> List[Dict[str, Any]]:
-    """Get case distribution by county"""
+    """
+    Get case distribution by county
+    
+    Returns:
+        List of dicts with county name and count
+    """
     try:
         with engine.connect() as conn:
             result = conn.execute(text("""
@@ -229,12 +377,17 @@ def get_cases_by_county() -> List[Dict[str, Any]]:
         return []
 
 
-def get_conversion_funnel() -> Dict[str, int]:
-    """Calculate conversion rates through the pipeline"""
+def get_conversion_funnel() -> Dict[str, Any]:
+    """
+    Calculate conversion rates through the pipeline
+    
+    Returns:
+        Dict with funnel metrics and conversion rates
+    """
     db = SessionLocal()
     
     try:
-        funnel = {}
+        funnel: Dict[str, Any] = {}
         
         # Total leads (try with archived filter, fallback to all)
         try:
@@ -268,21 +421,18 @@ def get_conversion_funnel() -> Dict[str, int]:
             funnel["offer_accepted"] = 0
             funnel["closed_won"] = 0
         
-        # Calculate conversion rates
-        if funnel["total_leads"] > 0:
-            funnel["contact_rate"] = round(
-                (funnel["contacted"] / funnel["total_leads"]) * 100, 1
-            )
-            funnel["offer_rate"] = round(
-                (funnel["offer_sent"] / funnel["total_leads"]) * 100, 1
-            )
-            funnel["close_rate"] = round(
-                (funnel["closed_won"] / funnel["total_leads"]) * 100, 1
-            )
-        else:
-            funnel["contact_rate"] = 0
-            funnel["offer_rate"] = 0
-            funnel["close_rate"] = 0
+        # ✅ SAFE DIVISION - Calculate conversion rates
+        total_leads = funnel["total_leads"]
+        
+        funnel["contact_rate"] = round(
+            safe_divide(funnel["contacted"], total_leads) * 100, 1
+        )
+        funnel["offer_rate"] = round(
+            safe_divide(funnel["offer_sent"], total_leads) * 100, 1
+        )
+        funnel["close_rate"] = round(
+            safe_divide(funnel["closed_won"], total_leads) * 100, 1
+        )
         
         return funnel
     
@@ -291,7 +441,12 @@ def get_conversion_funnel() -> Dict[str, int]:
 
 
 def get_roi_analysis() -> Dict[str, Any]:
-    """Calculate ROI metrics for closed deals"""
+    """
+    Calculate ROI metrics for closed deals
+    
+    Returns:
+        Dict with ROI analysis metrics
+    """
     db = SessionLocal()
     
     try:
@@ -306,24 +461,24 @@ def get_roi_analysis() -> Dict[str, Any]:
             # Columns don't exist, return empty
             return {
                 "total_deals": 0,
-                "avg_purchase_price": 0,
-                "avg_arv": 0,
-                "avg_profit": 0,
-                "avg_roi_pct": 0,
+                "avg_purchase_price": 0.0,
+                "avg_arv": 0.0,
+                "avg_profit": 0.0,
+                "avg_roi_pct": 0.0,
             }
         
         if not closed_cases:
             return {
                 "total_deals": 0,
-                "avg_purchase_price": 0,
-                "avg_arv": 0,
-                "avg_profit": 0,
-                "avg_roi_pct": 0,
+                "avg_purchase_price": 0.0,
+                "avg_arv": 0.0,
+                "avg_profit": 0.0,
+                "avg_roi_pct": 0.0,
             }
         
         total_purchase = sum(float(c.close_price or 0) for c in closed_cases)
         total_arv = sum(float(c.arv or 0) for c in closed_cases)
-        total_profit = 0
+        total_profit = 0.0
         
         for case in closed_cases:
             purchase = float(case.close_price or 0)
@@ -335,10 +490,12 @@ def get_roi_analysis() -> Dict[str, Any]:
             total_profit += profit
         
         count = len(closed_cases)
-        avg_purchase = total_purchase / count
-        avg_arv = total_arv / count
-        avg_profit = total_profit / count
-        avg_roi_pct = (avg_profit / avg_purchase * 100) if avg_purchase > 0 else 0
+        
+        # ✅ SAFE DIVISION - Avoid division by zero
+        avg_purchase = safe_divide(total_purchase, count)
+        avg_arv = safe_divide(total_arv, count)
+        avg_profit = safe_divide(total_profit, count)
+        avg_roi_pct = safe_divide(avg_profit, avg_purchase) * 100 if avg_purchase > 0 else 0.0
         
         return {
             "total_deals": count,
@@ -353,25 +510,47 @@ def get_roi_analysis() -> Dict[str, Any]:
 
 
 def get_activity_timeline(days: int = 30) -> List[Dict[str, Any]]:
-    """Get recent activity (notes, status changes, etc.)"""
+    """
+    Get recent activity (notes, status changes, etc.)
+    
+    Args:
+        days: Number of days to include (1-365), default 30
+    
+    Returns:
+        List of activity items with timestamp, type, case_id, content
+    
+    Raises:
+        ValueError: If days parameter is invalid
+    """
+    # ✅ VALIDATE INPUT
+    try:
+        days_validated = validate_days(days)
+    except ValueError as e:
+        logger.error(f"Invalid days parameter: {e}")
+        raise
+    
     db = SessionLocal()
     
     try:
-        cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        cutoff = (datetime.now() - timedelta(days=days_validated)).strftime("%Y-%m-%d")
         
         # Recent notes
         notes = db.query(Note).filter(
             Note.created_at >= cutoff
         ).order_by(Note.created_at.desc()).limit(50).all()
         
-        activity = []
+        activity: List[Dict[str, Any]] = []
         
         for note in notes:
+            content = note.content or ""
+            # Truncate long content
+            truncated_content = content[:100] + "..." if len(content) > 100 else content
+            
             activity.append({
                 "timestamp": note.created_at,
                 "type": "note",
                 "case_id": note.case_id,
-                "content": (note.content or "")[:100] + "..." if len(note.content or "") > 100 else note.content,
+                "content": truncated_content,
             })
         
         # Sort by timestamp
@@ -384,48 +563,73 @@ def get_activity_timeline(days: int = 30) -> List[Dict[str, Any]]:
 
 
 def get_top_opportunities(limit: int = 10) -> List[Dict[str, Any]]:
-    """Get top opportunities ranked by potential profit"""
+    """
+    Get top opportunities ranked by potential profit
+    
+    Args:
+        limit: Maximum number of opportunities to return (1-1000), default 10
+    
+    Returns:
+        List of top opportunities with profit calculations
+    
+    Raises:
+        ValueError: If limit parameter is invalid
+    """
+    # ✅ VALIDATE INPUT
+    try:
+        limit_validated = validate_limit(limit, max_limit=1000)
+    except ValueError as e:
+        logger.error(f"Invalid limit parameter: {e}")
+        raise
+    
     try:
         with engine.connect() as conn:
+            # ✅ USE PARAMETERIZED QUERY (prevent SQL injection)
             # Try query with archived column
             try:
-                result = conn.execute(text(f"""
-                    SELECT 
-                        id,
-                        case_number,
-                        address_override,
-                        address,
-                        arv,
-                        rehab,
-                        closing_costs,
-                        ((arv * 0.65) - COALESCE(rehab, 0) - COALESCE(closing_costs, 0)) as potential_profit,
-                        status
-                    FROM cases
-                    WHERE arv > 0 
-                      AND (archived = 0 OR archived IS NULL)
-                    ORDER BY potential_profit DESC
-                    LIMIT {limit}
-                """)).fetchall()
+                result = conn.execute(
+                    text("""
+                        SELECT 
+                            id,
+                            case_number,
+                            address_override,
+                            address,
+                            arv,
+                            rehab,
+                            closing_costs,
+                            ((arv * 0.65) - COALESCE(rehab, 0) - COALESCE(closing_costs, 0)) as potential_profit,
+                            status
+                        FROM cases
+                        WHERE arv > 0 
+                          AND (archived = 0 OR archived IS NULL)
+                        ORDER BY potential_profit DESC
+                        LIMIT :limit
+                    """),
+                    {"limit": limit_validated}  # ✅ Safe parameter binding
+                ).fetchall()
             except Exception:
                 # Try without archived filter
-                result = conn.execute(text(f"""
-                    SELECT 
-                        id,
-                        case_number,
-                        address_override,
-                        address,
-                        arv,
-                        COALESCE(rehab, 0) as rehab,
-                        COALESCE(closing_costs, 0) as closing_costs,
-                        ((arv * 0.65) - COALESCE(rehab, 0) - COALESCE(closing_costs, 0)) as potential_profit,
-                        'new' as status
-                    FROM cases
-                    WHERE arv > 0
-                    ORDER BY potential_profit DESC
-                    LIMIT {limit}
-                """)).fetchall()
+                result = conn.execute(
+                    text("""
+                        SELECT 
+                            id,
+                            case_number,
+                            address_override,
+                            address,
+                            arv,
+                            COALESCE(rehab, 0) as rehab,
+                            COALESCE(closing_costs, 0) as closing_costs,
+                            ((arv * 0.65) - COALESCE(rehab, 0) - COALESCE(closing_costs, 0)) as potential_profit,
+                            'new' as status
+                        FROM cases
+                        WHERE arv > 0
+                        ORDER BY potential_profit DESC
+                        LIMIT :limit
+                    """),
+                    {"limit": limit_validated}  # ✅ Safe parameter binding
+                ).fetchall()
             
-            opportunities = []
+            opportunities: List[Dict[str, Any]] = []
             for row in result:
                 opportunities.append({
                     "id": row[0],

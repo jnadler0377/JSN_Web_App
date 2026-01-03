@@ -6,11 +6,162 @@ import re
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from decimal import Decimal
+from datetime import datetime
 
 from app.config import settings
 
 logger = logging.getLogger("pascowebapp.ocr")
 
+
+# ========================================
+# VALIDATION FUNCTIONS (NEW - Security Fix)
+# ========================================
+
+def validate_parcel_id(parcel_id: str) -> Optional[str]:
+    """
+    Validate and clean a parcel ID
+    Returns cleaned parcel_id or None if invalid
+    
+    Valid formats:
+    - Pasco: XX-XX-XX-XXXX-XXXXX-XXXX
+    - Pinellas: XX-XX-XX-XXXXX-XXX-XXXX
+    """
+    if not parcel_id or not isinstance(parcel_id, str):
+        return None
+    
+    parcel_id = parcel_id.strip()
+    
+    # Check length (reasonable bounds)
+    if len(parcel_id) < 10 or len(parcel_id) > 50:
+        logger.warning(f"Parcel ID length out of bounds: {len(parcel_id)}")
+        return None
+    
+    # Must match one of the known formats
+    pasco_pattern = r'^\d{2}-\d{2}-\d{2}-\d{4}-\d{5}-\d{4}$'
+    pinellas_pattern = r'^\d{2}-\d{2}-\d{2}-\d{5}-\d{3}-\d{4}$'
+    
+    if re.match(pasco_pattern, parcel_id):
+        logger.debug(f"Valid Pasco parcel ID: {parcel_id}")
+        return parcel_id
+    elif re.match(pinellas_pattern, parcel_id):
+        logger.debug(f"Valid Pinellas parcel ID: {parcel_id}")
+        return parcel_id
+    else:
+        logger.warning(f"Parcel ID doesn't match known formats: {parcel_id}")
+        return None
+
+
+def validate_address(address: str) -> Optional[str]:
+    """
+    Validate and clean an address
+    Returns cleaned address or None if invalid
+    """
+    if not address or not isinstance(address, str):
+        return None
+    
+    address = address.strip()
+    
+    # Length check (must be reasonable)
+    if len(address) < 10:
+        logger.warning(f"Address too short: {address}")
+        return None
+    
+    if len(address) > 200:
+        logger.warning(f"Address too long ({len(address)} chars), truncating")
+        address = address[:200]
+    
+    # Must contain numbers (street number)
+    if not re.search(r'\d', address):
+        logger.warning(f"Address has no numbers: {address}")
+        return None
+    
+    # Must contain letters (street name)
+    if not re.search(r'[A-Za-z]', address):
+        logger.warning(f"Address has no letters: {address}")
+        return None
+    
+    # Remove/check for dangerous characters
+    dangerous_chars = ['<', '>', '{', '}', '\\', '|', '^', '~', '[', ']', '`', '\x00']
+    for char in dangerous_chars:
+        if char in address:
+            logger.warning(f"Address contains dangerous character '{char}': {address}")
+            return None
+    
+    # Remove excessive whitespace
+    address = re.sub(r'\s+', ' ', address)
+    
+    logger.debug(f"Valid address: {address}")
+    return address
+
+
+def validate_case_number(case_number: str) -> Optional[str]:
+    """
+    Validate case number format
+    Returns cleaned case_number or None if invalid
+    
+    Standard format: XX-XXXX-XX-XXXXXX-XXXX-XX
+    """
+    if not case_number or not isinstance(case_number, str):
+        return None
+    
+    case_number = case_number.strip().upper()
+    
+    # Length check
+    if len(case_number) < 15 or len(case_number) > 30:
+        logger.warning(f"Case number length out of bounds: {case_number}")
+        return None
+    
+    # Standard format: XX-XXXX-XX-XXXXXX-XXXX-XX
+    pattern = r'^\d{2}-\d{4}-[A-Z]{2}-\d{6}-[A-Z]{4}-[A-Z]{2}$'
+    
+    if re.match(pattern, case_number):
+        logger.debug(f"Valid case number: {case_number}")
+        return case_number
+    else:
+        logger.warning(f"Case number doesn't match expected format: {case_number}")
+        return None
+
+
+def validate_date_string(date_str: str) -> Optional[str]:
+    """
+    Validate date string and normalize format
+    Returns YYYY-MM-DD format or None if invalid
+    """
+    if not date_str or not isinstance(date_str, str):
+        return None
+    
+    date_str = date_str.strip()
+    
+    # Try parsing various formats
+    formats = [
+        "%m/%d/%Y",
+        "%m-%d-%Y",
+        "%Y-%m-%d",
+        "%B %d, %Y",
+        "%B %d %Y",
+        "%m/%d/%y",
+    ]
+    
+    for fmt in formats:
+        try:
+            dt = datetime.strptime(date_str, fmt)
+            # Sanity check: between 1990 and 2050
+            if 1990 <= dt.year <= 2050:
+                normalized = dt.strftime("%Y-%m-%d")
+                logger.debug(f"Valid date: {date_str} -> {normalized}")
+                return normalized
+            else:
+                logger.warning(f"Date year out of range: {dt.year}")
+        except ValueError:
+            continue
+    
+    logger.warning(f"Could not parse date: {date_str}")
+    return None
+
+
+# ========================================
+# ORIGINAL EXTRACTION FUNCTIONS
+# ========================================
 
 def extract_text_from_pdf(pdf_path: str) -> str:
     """
@@ -333,6 +484,7 @@ def extract_document_data(pdf_path: str, document_type: str) -> Dict[str, Any]:
 def auto_populate_case_from_ocr(case_id: int, ocr_results: Dict[str, Any]) -> Dict[str, str]:
     """
     Automatically populate case fields from OCR results
+    ✅ NOW WITH VALIDATION (Security Fix)
     
     Returns:
         Dict of field_name -> new_value that were auto-populated
@@ -342,36 +494,75 @@ def auto_populate_case_from_ocr(case_id: int, ocr_results: Dict[str, Any]) -> Di
     
     db = SessionLocal()
     populated_fields = {}
+    validation_warnings = []
     
     try:
         case = db.get(Case, case_id) if hasattr(db, "get") else db.query(Case).get(case_id)
         if not case:
+            logger.error(f"Case {case_id} not found")
             return populated_fields
         
         structured = ocr_results.get("structured_data", {})
         
-        # Parcel ID
+        # Parcel ID - VALIDATED ✅
         if not case.parcel_id and structured.get("parcel_id"):
-            case.parcel_id = structured["parcel_id"]
-            populated_fields["parcel_id"] = structured["parcel_id"]
+            validated_parcel = validate_parcel_id(structured["parcel_id"])
+            if validated_parcel:
+                case.parcel_id = validated_parcel
+                populated_fields["parcel_id"] = validated_parcel
+                logger.info(f"Auto-populated parcel_id: {validated_parcel}")
+            else:
+                msg = f"Invalid parcel_id from OCR: {structured['parcel_id']}"
+                logger.warning(msg)
+                validation_warnings.append(msg)
         
-        # Address
+        # Address - VALIDATED ✅
         if not case.address and structured.get("property_address"):
-            case.address = structured["property_address"]
-            populated_fields["address"] = structured["property_address"]
+            validated_address = validate_address(structured["property_address"])
+            if validated_address:
+                case.address = validated_address
+                populated_fields["address"] = validated_address
+                logger.info(f"Auto-populated address: {validated_address}")
+            else:
+                msg = f"Invalid address from OCR: {structured['property_address']}"
+                logger.warning(msg)
+                validation_warnings.append(msg)
         
-        # Case number (if from lis pendens)
+        # Case number - VALIDATED ✅
         if not case.case_number and structured.get("case_number"):
-            case.case_number = structured["case_number"]
-            populated_fields["case_number"] = structured["case_number"]
+            validated_case_num = validate_case_number(structured["case_number"])
+            if validated_case_num:
+                case.case_number = validated_case_num
+                populated_fields["case_number"] = validated_case_num
+                logger.info(f"Auto-populated case_number: {validated_case_num}")
+            else:
+                msg = f"Invalid case_number from OCR: {structured['case_number']}"
+                logger.warning(msg)
+                validation_warnings.append(msg)
         
-        # Filing date
+        # Filing date - VALIDATED ✅
         if not case.filing_datetime and structured.get("filing_date"):
-            case.filing_datetime = structured["filing_date"]
-            populated_fields["filing_datetime"] = structured["filing_date"]
+            validated_date = validate_date_string(structured["filing_date"])
+            if validated_date:
+                case.filing_datetime = validated_date
+                populated_fields["filing_datetime"] = validated_date
+                logger.info(f"Auto-populated filing_datetime: {validated_date}")
+            else:
+                msg = f"Invalid filing_date from OCR: {structured['filing_date']}"
+                logger.warning(msg)
+                validation_warnings.append(msg)
         
         db.commit()
-        logger.info(f"Auto-populated {len(populated_fields)} fields for case {case_id}")
+        
+        if populated_fields:
+            logger.info(f"Auto-populated {len(populated_fields)} fields for case {case_id}: {list(populated_fields.keys())}")
+        
+        if validation_warnings:
+            logger.warning(f"OCR validation warnings for case {case_id}: {len(validation_warnings)} field(s) rejected")
+    
+    except Exception as exc:
+        logger.error(f"Error auto-populating case {case_id} from OCR: {exc}", exc_info=True)
+        db.rollback()
     
     finally:
         db.close()

@@ -12,11 +12,11 @@ from fastapi import HTTPException
 from sqlalchemy import inspect
 
 from app.database import engine
-from app.settings import settings
+from app.config import settings
 
 # BatchData config (from env/.env via app.settings)
-BATCHDATA_API_KEY = settings.BATCHDATA_API_KEY
-BATCHDATA_BASE_URL = settings.BATCHDATA_BASE_URL
+BATCHDATA_API_KEY = settings.batchdata_api_key
+BATCHDATA_BASE_URL = settings.batchdata_base_url
 from pathlib import Path
 
 logger = logging.getLogger("pascowebapp")

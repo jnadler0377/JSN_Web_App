@@ -1,48 +1,84 @@
-# app/auth.py - Authentication utilities and models
-from passlib.context import CryptContext
-from sqlalchemy import Column, Integer, String, Boolean, DateTime
-from sqlalchemy.sql import func
-from app.database import Base
-import secrets
+# app/auth.py
+"""
+Authentication utilities - Password hashing and verification
+✅ NO CIRCULAR IMPORTS - Only imports from config and standard library
+"""
 
-# Password hashing configuration
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+from __future__ import annotations
 
-class User(Base):
-    __tablename__ = "users"
-    __table_args__ = {'extend_existing': True}
-    
-    id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, index=True, nullable=False)
-    email = Column(String, unique=True, index=True, nullable=False)
-    hashed_password = Column(String, nullable=False)
-    full_name = Column(String, default="")
-    role = Column(String, default="analyst")
-    is_active = Column(Boolean, default=True)
-    is_admin = Column(Boolean, default=False)
-    created_at = Column(DateTime, server_default=func.now())
-    last_login = Column(DateTime, nullable=True)
-    
-    def verify_password(self, password: str) -> bool:
-        """Verify a password against the hash"""
-        return pwd_context.verify(password, self.hashed_password)
-    
-    @staticmethod
-    def hash_password(password: str) -> str:
-        """Hash a password"""
-        return pwd_context.hash(password)
+import bcrypt
+import logging
+from typing import TYPE_CHECKING
 
+from app.config import settings
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a password against a hash"""
-    return pwd_context.verify(plain_password, hashed_password)
+if TYPE_CHECKING:
+    # Type hints only, not imported at runtime
+    pass
+
+logger = logging.getLogger("pascowebapp.auth")
 
 
 def get_password_hash(password: str) -> str:
-    """Hash a password"""
-    return pwd_context.hash(password)
+    """
+    Hash a password using bcrypt
+    
+    Args:
+        password: Plain text password
+    
+    Returns:
+        Bcrypt hash of the password
+    
+    Example:
+        >>> hashed = get_password_hash("my_password")
+        >>> hashed.startswith("$2b$")
+        True
+    """
+    salt = bcrypt.gensalt(rounds=settings.bcrypt_rounds)
+    hashed = bcrypt.hashpw(password.encode("utf-8"), salt)
+    return hashed.decode("utf-8")
 
 
-def generate_session_token() -> str:
-    """Generate a secure random session token"""
-    return secrets.token_urlsafe(32)
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """
+    Verify a password against a bcrypt hash
+    
+    Args:
+        plain_password: Plain text password to verify
+        hashed_password: Bcrypt hash to verify against
+    
+    Returns:
+        True if password matches hash, False otherwise
+    
+    Example:
+        >>> hashed = get_password_hash("test123")
+        >>> verify_password("test123", hashed)
+        True
+        >>> verify_password("wrong", hashed)
+        False
+    """
+    try:
+        return bcrypt.checkpw(
+            plain_password.encode("utf-8"),
+            hashed_password.encode("utf-8")
+        )
+    except Exception as exc:
+        logger.error(f"Password verification failed: {exc}")
+        return False
+
+
+# ========================================
+# Re-export User model for backward compatibility
+# ========================================
+
+def __getattr__(name: str):
+    """
+    Lazy import of User model to avoid circular imports
+    
+    This allows: from app.auth import User
+    Without creating circular import at module load time
+    """
+    if name == "User":
+        from app.models import User as UserModel
+        return UserModel
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")

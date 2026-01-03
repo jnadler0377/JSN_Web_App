@@ -1,189 +1,66 @@
-{# app/templates/cases/_case_property_tab.html #}
-
-<style>
-.property-section {
-    background: var(--panel);
-    border-radius: 10px;
-    padding: 1.5rem;
-    border: 1px solid #263043;
-    margin-bottom: 1.5rem;
-}
-
-.property-section h3 {
-    margin: 0 0 1rem 0;
-    color: var(--text);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.property-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-    gap: 1rem;
-}
-
-.property-field {
-    display: flex;
-    flex-direction: column;
-}
-
-.property-field label {
-    font-size: 0.85rem;
-    color: var(--muted);
-    margin-bottom: 0.25rem;
-}
-
-.property-field .value {
-    color: var(--text);
-    padding: 0.5rem;
-    background: var(--bg);
-    border-radius: 6px;
-    border: 1px solid #263043;
-}
-
-.property-field input,
-.property-field select {
-    padding: 0.5rem;
-    background: var(--bg);
-    border: 1px solid #263043;
-    border-radius: 6px;
-    color: var(--text);
-}
-
-.edit-mode .property-field .value {
-    display: none;
-}
-
-.edit-mode .property-field input,
-.edit-mode .property-field select {
-    display: block;
-}
-
-.property-field input,
-.property-field select {
-    display: none;
-}
-
-.flag-badge {
-    display: inline-block;
-    padding: 0.25rem 0.75rem;
-    background: var(--acc);
-    color: white;
-    border-radius: 4px;
-    font-size: 0.85rem;
-    margin-right: 0.5rem;
-    margin-bottom: 0.5rem;
-}
-
-.flag-badge.false {
-    background: #334155;
-    color: var(--muted);
-}
-
-.history-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.9rem;
-}
-
-.history-table th,
-.history-table td {
-    padding: 0.75rem;
-    text-align: left;
-    border-bottom: 1px solid #263043;
-}
-
-.history-table th {
-    background: #0f1629;
-    color: var(--muted);
-    font-weight: 600;
-    text-transform: uppercase;
-    font-size: 0.75rem;
-}
-
-.no-data {
-    text-align: center;
-    padding: 2rem;
-    color: var(--muted);
-}
-</style>
+{# app/templates/cases/_case_property_tab.html - V3 Design #}
 
 {% if property_data %}
 
 <!-- Owner Information -->
 <div class="property-section">
     <h3>
-        👤 Owner Information
-        <button type="button" class="btn" onclick="toggleEditMode('owner-section')">Edit</button>
+        <span>👤 Owner Information</span>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="toggleEditMode('owner-section')">Edit</button>
     </h3>
     <form method="post" action="/cases/{{ case.id }}/property/update-owner" id="owner-section">
-        
         {% if property_data.owners and property_data.owners|length > 0 %}
-            
-            {# List all owner names #}
             {% for owner in property_data.owners %}
-            <div class="property-field" style="margin-bottom: 1rem;">
+            <div class="property-field" style="margin-bottom: 16px;">
                 <label>Owner {{ loop.index }}</label>
                 <div class="value">{{ owner.fullName or 'N/A' }}</div>
-                <input type="text" name="owner_name_{{ loop.index }}" value="{{ owner.fullName or '' }}">
+                <input type="text" name="owner_name_{{ loop.index }}" value="{{ owner.fullName or '' }}" class="form-control edit-field" style="display: none;">
             </div>
             {% endfor %}
             
-            {# Single shared mailing address (use first owner's address) #}
-            <h4 style="margin: 2rem 0 1rem 0; padding-top: 1.5rem; border-top: 1px solid #263043;">
+            <h4 style="margin: 24px 0 16px 0; padding-top: 16px; border-top: 1px solid var(--border); font-size: 14px; color: var(--text-secondary);">
                 Mailing Address
             </h4>
             
             {% set shared_address = property_data.owners[0].mailingAddress %}
-            
             <div class="property-grid">
                 <div class="property-field">
                     <label>Street</label>
                     <div class="value">{{ shared_address.street or 'N/A' }}</div>
-                    <input type="text" name="mailing_street" value="{{ shared_address.street or '' }}">
+                    <input type="text" name="mailing_street" value="{{ shared_address.street or '' }}" class="form-control edit-field" style="display: none;">
                 </div>
                 <div class="property-field">
                     <label>City</label>
                     <div class="value">{{ shared_address.city or 'N/A' }}</div>
-                    <input type="text" name="mailing_city" value="{{ shared_address.city or '' }}">
+                    <input type="text" name="mailing_city" value="{{ shared_address.city or '' }}" class="form-control edit-field" style="display: none;">
                 </div>
                 <div class="property-field">
                     <label>State</label>
                     <div class="value">{{ shared_address.state or 'N/A' }}</div>
-                    <input type="text" name="mailing_state" value="{{ shared_address.state or '' }}">
+                    <input type="text" name="mailing_state" value="{{ shared_address.state or '' }}" class="form-control edit-field" style="display: none;">
                 </div>
                 <div class="property-field">
                     <label>ZIP Code</label>
                     <div class="value">{{ shared_address.zipCode or 'N/A' }}</div>
-                    <input type="text" name="mailing_zip" value="{{ shared_address.zipCode or '' }}">
-                </div>
-                <div class="property-field">
-                    <label>County</label>
-                    <div class="value">{{ shared_address.county or 'N/A' }}</div>
-                    <input type="text" name="mailing_county" value="{{ shared_address.county or '' }}">
+                    <input type="text" name="mailing_zip" value="{{ shared_address.zipCode or '' }}" class="form-control edit-field" style="display: none;">
                 </div>
             </div>
-            
             <input type="hidden" name="owner_count" value="{{ property_data.owners|length }}">
-            
         {% else %}
-            {# Fallback for no owners data #}
             <div class="property-field">
                 <label>Owner</label>
                 <div class="value">N/A</div>
             </div>
         {% endif %}
-        
-        <button type="submit" class="btn" style="margin-top: 1rem; display: none;">Save Changes</button>
+        <button type="submit" class="btn btn-primary edit-field" style="display: none; margin-top: 16px;">Save Changes</button>
     </form>
 </div>
 
-<!-- QuickList Flags -->
+<!-- Property Flags -->
 {% if property_data.quickList %}
 <div class="property-section">
     <h3>🏷️ Property Flags</h3>
-    <div>
+    <div style="display: flex; flex-wrap: wrap; gap: 8px;">
         {% for key, value in property_data.quickList.items() %}
             <span class="flag-badge {% if not value %}false{% endif %}">
                 {{ key | replace('_', ' ') | title }}: {{ '✓' if value else '✗' }}
@@ -197,52 +74,33 @@
 {% if property_data.valuation %}
 <div class="property-section">
     <h3>
-        💰 Valuation
-        <button type="button" class="btn" onclick="toggleEditMode('valuation-section')">Edit</button>
+        <span>💰 Valuation</span>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="toggleEditMode('valuation-section')">Edit</button>
     </h3>
     <form method="post" action="/cases/{{ case.id }}/property/update-valuation" id="valuation-section">
         <div class="property-grid">
             <div class="property-field">
                 <label>Estimated Value</label>
                 <div class="value">${{ "{:,.0f}".format(property_data.valuation.estimatedValue) if property_data.valuation.estimatedValue else 'N/A' }}</div>
-                <input type="number" name="estimated_value" step="0.01" value="{{ property_data.valuation.estimatedValue or '' }}">
+                <input type="number" name="estimated_value" step="0.01" value="{{ property_data.valuation.estimatedValue or '' }}" class="form-control edit-field" style="display: none;">
             </div>
             <div class="property-field">
-    <label>As of Date</label>
-    <div class="value">{{ property_data.valuation.asOfDate | format_date }}</div>
-    <input type="date" name="as_of_date" value="{{ property_data.valuation.asOfDate or '' }}">
-</div>
+                <label>As of Date</label>
+                <div class="value">{{ property_data.valuation.asOfDate | format_date if property_data.valuation.asOfDate else 'N/A' }}</div>
+                <input type="date" name="as_of_date" value="{{ property_data.valuation.asOfDate or '' }}" class="form-control edit-field" style="display: none;">
+            </div>
             <div class="property-field">
                 <label>Confidence Score</label>
                 <div class="value">{{ property_data.valuation.confidenceScore or 'N/A' }}</div>
-                <input type="number" name="confidence_score" step="0.01" value="{{ property_data.valuation.confidenceScore or '' }}">
+                <input type="number" name="confidence_score" step="0.01" value="{{ property_data.valuation.confidenceScore or '' }}" class="form-control edit-field" style="display: none;">
             </div>
             <div class="property-field">
                 <label>Equity Percent</label>
                 <div class="value">{{ "{:.1f}%".format(property_data.valuation.equityPercent) if property_data.valuation.equityPercent else 'N/A' }}</div>
-                <input type="number" name="equity_percent" step="0.01" value="{{ property_data.valuation.equityPercent or '' }}">
-            </div>
-            <div class="property-field">
-                <label>LTV (Loan to Value)</label>
-                <div class="value">{{ "{:.1f}%".format(property_data.valuation.ltv) if property_data.valuation.ltv else 'N/A' }}</div>
-                <input type="number" name="ltv" step="0.01" value="{{ property_data.valuation.ltv or '' }}">
             </div>
         </div>
-        <button type="submit" class="btn" style="margin-top: 1rem; display: none;">Save Changes</button>
+        <button type="submit" class="btn btn-primary edit-field" style="display: none; margin-top: 16px;">Save Changes</button>
     </form>
-</div>
-{% endif %}
-
-<!-- Intel -->
-{% if property_data.intel %}
-<div class="property-section">
-    <h3>📊 Intelligence Data</h3>
-    <div class="property-grid">
-        <div class="property-field">
-            <label>Sale Propensity</label>
-            <div class="value">{{ property_data.intel.salePropensity or 'N/A' }}</div>
-        </div>
-    </div>
 </div>
 {% endif %}
 
@@ -250,20 +108,20 @@
 {% if property_data.demographics %}
 <div class="property-section">
     <h3>
-        👥 Demographics
-        <button type="button" class="btn" onclick="toggleEditMode('demographics-section')">Edit</button>
+        <span>👥 Demographics</span>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="toggleEditMode('demographics-section')">Edit</button>
     </h3>
     <form method="post" action="/cases/{{ case.id }}/property/update-demographics" id="demographics-section">
         <div class="property-grid">
             <div class="property-field">
                 <label>Age</label>
                 <div class="value">{{ property_data.demographics.age or 'N/A' }}</div>
-                <input type="number" name="age" value="{{ property_data.demographics.age or '' }}">
+                <input type="number" name="age" value="{{ property_data.demographics.age or '' }}" class="form-control edit-field" style="display: none;">
             </div>
             <div class="property-field">
                 <label>Gender</label>
                 <div class="value">{{ property_data.demographics.gender or 'N/A' }}</div>
-                <select name="gender">
+                <select name="gender" class="form-control edit-field" style="display: none;">
                     <option value="">Unknown</option>
                     <option value="Male" {% if property_data.demographics.gender == 'Male' %}selected{% endif %}>Male</option>
                     <option value="Female" {% if property_data.demographics.gender == 'Female' %}selected{% endif %}>Female</option>
@@ -272,30 +130,25 @@
             <div class="property-field">
                 <label>Marital Status</label>
                 <div class="value">{{ property_data.demographics.maritalStatus or 'N/A' }}</div>
-                <input type="text" name="marital_status" value="{{ property_data.demographics.maritalStatus or '' }}">
-            </div>
-            <div class="property-field">
-                <label>Children Count</label>
-                <div class="value">{{ property_data.demographics.childCount or 'N/A' }}</div>
-                <input type="number" name="child_count" value="{{ property_data.demographics.childCount or '' }}">
+                <input type="text" name="marital_status" value="{{ property_data.demographics.maritalStatus or '' }}" class="form-control edit-field" style="display: none;">
             </div>
             <div class="property-field">
                 <label>Income</label>
                 <div class="value">${{ "{:,.0f}".format(property_data.demographics.income) if property_data.demographics.income else 'N/A' }}</div>
-                <input type="number" name="income" step="1000" value="{{ property_data.demographics.income or '' }}">
+                <input type="number" name="income" step="1000" value="{{ property_data.demographics.income or '' }}" class="form-control edit-field" style="display: none;">
             </div>
             <div class="property-field">
                 <label>Net Worth</label>
                 <div class="value">${{ "{:,.0f}".format(property_data.demographics.netWorth) if property_data.demographics.netWorth else 'N/A' }}</div>
-                <input type="number" name="net_worth" step="1000" value="{{ property_data.demographics.netWorth or '' }}">
+                <input type="number" name="net_worth" step="1000" value="{{ property_data.demographics.netWorth or '' }}" class="form-control edit-field" style="display: none;">
             </div>
             <div class="property-field">
                 <label>Occupation</label>
                 <div class="value">{{ property_data.demographics.individualOccupation or 'N/A' }}</div>
-                <input type="text" name="occupation" value="{{ property_data.demographics.individualOccupation or '' }}">
+                <input type="text" name="occupation" value="{{ property_data.demographics.individualOccupation or '' }}" class="form-control edit-field" style="display: none;">
             </div>
         </div>
-        <button type="submit" class="btn" style="margin-top: 1rem; display: none;">Save Changes</button>
+        <button type="submit" class="btn btn-primary edit-field" style="display: none; margin-top: 16px;">Save Changes</button>
     </form>
 </div>
 {% endif %}
@@ -329,7 +182,7 @@
 </div>
 {% endif %}
 
-<!-- IDs -->
+<!-- Property IDs -->
 {% if property_data.ids %}
 <div class="property-section">
     <h3>🔢 Property IDs</h3>
@@ -361,13 +214,13 @@
             <tbody>
                 {% for mortgage in property_data.mortgageHistory %}
                 <tr>
-    <td>{{ mortgage.documentDate | format_date }}</td>
-    <td>{{ mortgage.lenderName or 'N/A' }}</td>
-    <td>${{ "{:,.0f}".format(mortgage.loanAmount) if mortgage.loanAmount else 'N/A' }}</td>
-    <td>{{ "{:.2f}%".format(mortgage.interestRate) if mortgage.interestRate else 'N/A' }}</td>
-    <td>{{ mortgage.loanType or 'N/A' }}</td>
-    <td>{{ mortgage.dueDate | format_date }}</td>
-</tr>
+                    <td>{{ mortgage.documentDate | format_date if mortgage.documentDate else 'N/A' }}</td>
+                    <td>{{ mortgage.lenderName or 'N/A' }}</td>
+                    <td>${{ "{:,.0f}".format(mortgage.loanAmount) if mortgage.loanAmount else 'N/A' }}</td>
+                    <td>{{ "{:.2f}%".format(mortgage.interestRate) if mortgage.interestRate else 'N/A' }}</td>
+                    <td>{{ mortgage.loanType or 'N/A' }}</td>
+                    <td>{{ mortgage.dueDate | format_date if mortgage.dueDate else 'N/A' }}</td>
+                </tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -392,11 +245,11 @@
             <tbody>
                 {% for deed in property_data.deedHistory %}
                 <tr>
-    <td>{{ deed.documentDate | format_date }}</td>
-    <td>{{ deed.documentType or 'N/A' }}</td>
-    <td>${{ "{:,.0f}".format(deed.salePrice) if deed.salePrice else 'N/A' }}</td>
-    <td>{{ deed.buyers or 'N/A' }}</td>
-</tr>
+                    <td>{{ deed.documentDate | format_date if deed.documentDate else 'N/A' }}</td>
+                    <td>{{ deed.documentType or 'N/A' }}</td>
+                    <td>${{ "{:,.0f}".format(deed.salePrice) if deed.salePrice else 'N/A' }}</td>
+                    <td>{{ deed.buyers or 'N/A' }}</td>
+                </tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -414,9 +267,9 @@
             <div class="value">{{ property_data.foreclosure.caseNumber or 'N/A' }}</div>
         </div>
         <div class="property-field">
-    <label>Filing Date</label>
-    <div class="value">{{ property_data.foreclosure.filingDate | format_date }}</div>
-</div>
+            <label>Filing Date</label>
+            <div class="value">{{ property_data.foreclosure.filingDate | format_date if property_data.foreclosure.filingDate else 'N/A' }}</div>
+        </div>
         <div class="property-field">
             <label>Current Lender</label>
             <div class="value">{{ property_data.foreclosure.currentLenderName or 'N/A' }}</div>
@@ -429,38 +282,49 @@
 </div>
 {% endif %}
 
-<details style="margin-top: 2rem;">
-    <summary style="cursor: pointer; color: var(--muted); font-size: 0.9rem;">
+<!-- Raw JSON -->
+<details style="margin-top: 24px;">
+    <summary style="cursor: pointer; color: var(--text-muted); font-size: 14px; padding: 8px 0;">
         🔍 View Raw JSON Data
     </summary>
-    <pre style="background: #0f1629; padding: 1rem; border-radius: 8px; overflow-x: auto; margin-top: 1rem; font-size: 0.85rem;">{{ property_payload | tojson(indent=2) if property_payload else 'No data' }}</pre>
+    <pre style="background: var(--bg-alt); padding: 16px; border-radius: var(--radius-md); overflow-x: auto; margin-top: 8px; font-size: 12px; border: 1px solid var(--border);">{{ property_payload | tojson(indent=2) if property_payload else 'No data' }}</pre>
 </details>
 
 <script>
 function toggleEditMode(sectionId) {
     const section = document.getElementById(sectionId);
+    if (!section) return;
+    
     const isEditing = section.classList.contains('edit-mode');
+    const values = section.querySelectorAll('.value');
+    const editFields = section.querySelectorAll('.edit-field');
     
     if (isEditing) {
         section.classList.remove('edit-mode');
-        section.querySelector('button[type="submit"]').style.display = 'none';
+        values.forEach(v => v.style.display = 'block');
+        editFields.forEach(f => f.style.display = 'none');
     } else {
         section.classList.add('edit-mode');
-        section.querySelector('button[type="submit"]').style.display = 'block';
+        values.forEach(v => v.style.display = 'none');
+        editFields.forEach(f => f.style.display = 'block');
     }
 }
 </script>
 
 {% else %}
 
-<div class="no-data">
-    <h3 style="margin: 0 0 1rem 0;">📭 No Property Data Available</h3>
-    <p style="color: var(--muted); margin-bottom: 1.5rem;">
-        Property data has not been fetched yet.
-    </p>
-    <form method="post" action="/cases/{{ case.id }}/property-lookup" style="display:inline;">
-        <button type="submit" class="btn">🔍 Fetch Property Data ($.80)</button>
-    </form>
+<!-- No Property Data -->
+<div class="card">
+    <div class="card-body" style="text-align: center; padding: 48px;">
+        <div style="font-size: 48px; margin-bottom: 16px;">📭</div>
+        <h3 style="margin-bottom: 8px;">No Property Data Available</h3>
+        <p style="color: var(--text-muted); margin-bottom: 24px;">
+            Property data has not been fetched yet.
+        </p>
+        <form method="post" action="/cases/{{ case.id }}/property-lookup" style="display: inline;">
+            <button type="submit" class="btn btn-primary btn-lg">🔍 Fetch Property Data ($0.80)</button>
+        </form>
+    </div>
 </div>
 
 {% endif %}
