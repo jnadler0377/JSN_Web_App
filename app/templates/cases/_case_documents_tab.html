@@ -790,9 +790,20 @@
                     <input type="hidden" id="ocr-case-id" value="${caseId}">
                 `;
             } else {
-                // No fields extracted, show text preview
+                // No fields extracted - check for error/suggestion
+                const errorMsg = extracted.error || '';
+                const suggestion = extracted.suggestion || '';
                 const fullText = extracted.full_text || '';
-                if (fullText) {
+                
+                if (errorMsg) {
+                    content = `
+                        <div style="text-align: center; padding: 30px;">
+                            <div style="font-size: 48px; margin-bottom: 16px;">📄</div>
+                            <p style="font-weight: 600; color: var(--warning);">${errorMsg}</p>
+                            ${suggestion ? `<p style="font-size: 12px; color: var(--text-muted); margin-top: 12px; background: var(--bg-alt); padding: 10px; border-radius: 6px; font-family: monospace;">${suggestion}</p>` : ''}
+                        </div>
+                    `;
+                } else if (fullText) {
                     const preview = fullText.substring(0, 800) + (fullText.length > 800 ? '...' : '');
                     content = `
                         <div style="text-align: center; margin-bottom: 20px;">

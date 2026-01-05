@@ -525,6 +525,7 @@
         </form>
         {% endif %}
         <a href="/cases/{{ case.id }}/comparables" class="btn btn-secondary">📊 Comparables</a>
+        <button class="btn btn-secondary" onclick="generateCaseReport({{ case.id }})">📄 Generate Report</button>
         <a href="/cases" class="btn btn-ghost">← Back to Cases</a>
     </div>
 </div>
@@ -869,6 +870,22 @@ document.getElementById('lienModalForm')?.addEventListener('submit', async funct
 document.getElementById('lienModal')?.addEventListener('click', function(e) {
     if (e.target === this) closeLienModal();
 });
+
+// Generate Case Report - use existing report service
+async function generateCaseReport(caseId) {
+    const btn = event.target;
+    const originalText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '⏳ Generating...';
+    
+    // Use the existing report endpoint that generates the detailed PDF
+    window.location.href = `/cases/${caseId}/report`;
+    
+    setTimeout(() => {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+    }, 2000);
+}
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {

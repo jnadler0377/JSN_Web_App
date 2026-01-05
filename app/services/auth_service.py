@@ -126,7 +126,7 @@ def create_user(email: str, password: str, full_name: str, role: str = "analyst"
     Create a new user
     Returns user_id
     """
-    if role not in ["admin", "analyst", "closer", "viewer"]:
+    if role not in ["admin", "analyst", "owner", "subscriber"]:
         raise ValueError(f"Invalid role: {role}")
     
     hashed = get_password_hash(password)
@@ -177,7 +177,7 @@ def get_user_by_id(user_id: int) -> Optional[dict]:
     with engine.connect() as conn:
         result = conn.execute(
             text("""
-                SELECT id, email, full_name, role, is_active, last_login
+                SELECT id, email, full_name, role, is_active, last_login, is_admin
                 FROM users
                 WHERE id = :user_id
             """),

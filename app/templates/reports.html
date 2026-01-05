@@ -1,0 +1,764 @@
+{% extends "base.html" %}
+
+{% block title %}Reports - JSN Holdings{% endblock %}
+
+{% block page_title %}Reports{% endblock %}
+
+{% block content %}
+<style>
+.reports-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+    gap: 24px;
+    margin-bottom: 32px;
+}
+
+.report-card {
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    border: 1px solid var(--border);
+}
+
+.report-card-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.report-card-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+}
+
+.report-card-icon.portfolio {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.report-card-icon.roi {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+}
+
+.report-card-icon.deal {
+    background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+}
+
+.report-card-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text);
+    margin: 0;
+}
+
+.report-card-subtitle {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin: 0;
+}
+
+.report-card-body {
+    margin-bottom: 20px;
+}
+
+.report-card-body p {
+    color: var(--text-secondary);
+    font-size: 14px;
+    margin: 0 0 16px 0;
+    line-height: 1.6;
+}
+
+.report-options {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.report-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.report-option label {
+    font-size: 14px;
+    color: var(--text-secondary);
+}
+
+.report-option input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--primary);
+}
+
+.report-option input[type="date"],
+.report-option input[type="text"],
+.report-option select {
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+    background: var(--surface);
+    flex: 1;
+}
+
+.report-card-footer {
+    display: flex;
+    gap: 12px;
+}
+
+.btn-generate {
+    flex: 1;
+    padding: 12px 20px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    border-radius: var(--radius-md);
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: all 0.2s;
+}
+
+.btn-generate:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.btn-generate:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.btn-generate.success {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+}
+
+/* Generated Reports Section */
+.reports-history {
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border);
+    overflow: hidden;
+}
+
+.reports-history-header {
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.reports-history-header h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.reports-list {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.report-item {
+    display: flex;
+    align-items: center;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    transition: background 0.2s;
+}
+
+.report-item:hover {
+    background: var(--bg-alt);
+}
+
+.report-item:last-child {
+    border-bottom: none;
+}
+
+.report-item-icon {
+    width: 40px;
+    height: 40px;
+    background: #fee2e2;
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    margin-right: 16px;
+}
+
+.report-item-info {
+    flex: 1;
+}
+
+.report-item-name {
+    font-weight: 500;
+    font-size: 14px;
+    color: var(--text);
+    margin-bottom: 2px;
+}
+
+.report-item-meta {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.report-item-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.report-item-actions a,
+.report-item-actions button {
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    text-decoration: none;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.report-item-actions .btn-download {
+    background: var(--primary);
+    color: white;
+}
+
+.report-item-actions .btn-download:hover {
+    background: var(--primary-dark);
+}
+
+.report-item-actions .btn-delete {
+    background: transparent;
+    color: var(--danger);
+    border: 1px solid var(--danger);
+}
+
+.report-item-actions .btn-delete:hover {
+    background: var(--danger);
+    color: white;
+}
+
+.no-reports {
+    padding: 40px;
+    text-align: center;
+    color: var(--text-muted);
+}
+
+.no-reports-icon {
+    font-size: 48px;
+    margin-bottom: 12px;
+}
+
+/* Case Selection for ROI Report */
+.case-select-section {
+    margin-top: 16px;
+}
+
+.case-select-input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+    margin-bottom: 8px;
+}
+
+.selected-cases {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.selected-case-tag {
+    background: var(--primary-light);
+    color: var(--primary);
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.selected-case-tag button {
+    background: none;
+    border: none;
+    color: var(--primary);
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    padding: 0;
+}
+
+/* Not Available Warning */
+.not-available-warning {
+    background: #fef3c7;
+    border: 1px solid #f59e0b;
+    border-radius: var(--radius-md);
+    padding: 16px 20px;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.not-available-warning .warning-icon {
+    font-size: 24px;
+}
+
+.not-available-warning .warning-text {
+    flex: 1;
+}
+
+.not-available-warning .warning-text h4 {
+    margin: 0 0 4px 0;
+    color: #92400e;
+    font-size: 14px;
+}
+
+.not-available-warning .warning-text p {
+    margin: 0;
+    color: #a16207;
+    font-size: 13px;
+}
+
+.not-available-warning code {
+    background: rgba(0,0,0,0.1);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+/* Loading spinner */
+.btn-generate .spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+</style>
+
+{% if not reporting_available %}
+<div class="not-available-warning">
+    <span class="warning-icon">⚠️</span>
+    <div class="warning-text">
+        <h4>PDF Reports Not Available</h4>
+        <p>Install required packages: <code>pip install reportlab matplotlib</code></p>
+    </div>
+</div>
+{% endif %}
+
+<div class="reports-grid">
+    <!-- Portfolio Report -->
+    <div class="report-card">
+        <div class="report-card-header">
+            <div class="report-card-icon portfolio">📊</div>
+            <div>
+                <h3 class="report-card-title">Portfolio Report</h3>
+                <p class="report-card-subtitle">Comprehensive analysis</p>
+            </div>
+        </div>
+        <div class="report-card-body">
+            <p>Generate a comprehensive PDF report with executive summary, key metrics, charts, top deals, and recommendations.</p>
+            
+            <div class="report-options">
+                <div class="report-option">
+                    <label>From:</label>
+                    <input type="date" id="portfolio-start-date">
+                </div>
+                <div class="report-option">
+                    <label>To:</label>
+                    <input type="date" id="portfolio-end-date">
+                </div>
+                <div class="report-option">
+                    <input type="checkbox" id="portfolio-include-charts" checked>
+                    <label for="portfolio-include-charts">Include charts</label>
+                </div>
+                <div class="report-option">
+                    <input type="checkbox" id="portfolio-include-details" checked>
+                    <label for="portfolio-include-details">Include case details</label>
+                </div>
+            </div>
+        </div>
+        <div class="report-card-footer">
+            <button class="btn-generate" onclick="generatePortfolioReport()" {% if not reporting_available %}disabled{% endif %}>
+                <span>📄</span> Generate Report
+            </button>
+        </div>
+    </div>
+    
+    <!-- ROI Projection Report -->
+    <div class="report-card">
+        <div class="report-card-header">
+            <div class="report-card-icon roi">💰</div>
+            <div>
+                <h3 class="report-card-title">ROI Projection</h3>
+                <p class="report-card-subtitle">Investment analysis</p>
+            </div>
+        </div>
+        <div class="report-card-body">
+            <p>Generate ROI projections for selected cases showing investment requirements, returns, and profit analysis.</p>
+            
+            <div class="case-select-section">
+                <input type="text" class="case-select-input" id="roi-case-search" 
+                       placeholder="Search cases by number or address...">
+                <div class="selected-cases" id="selected-cases-container">
+                    <!-- Selected cases will appear here -->
+                </div>
+                <div id="case-search-results" style="max-height: 150px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); display: none;">
+                </div>
+            </div>
+        </div>
+        <div class="report-card-footer">
+            <button class="btn-generate" onclick="generateROIReport()" {% if not reporting_available %}disabled{% endif %}>
+                <span>📈</span> Generate ROI Report
+            </button>
+        </div>
+    </div>
+    
+    <!-- Single Deal Summary -->
+    <div class="report-card">
+        <div class="report-card-header">
+            <div class="report-card-icon deal">📋</div>
+            <div>
+                <h3 class="report-card-title">Deal Summary</h3>
+                <p class="report-card-subtitle">Individual case report</p>
+            </div>
+        </div>
+        <div class="report-card-body">
+            <p>Generate a one-page summary for a single deal with score, property info, and financial breakdown.</p>
+            
+            <div class="report-options">
+                <div class="report-option">
+                    <label>Case:</label>
+                    <select id="deal-case-select">
+                        <option value="">Select a case...</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        <div class="report-card-footer">
+            <button class="btn-generate" onclick="generateDealSummary()" {% if not reporting_available %}disabled{% endif %}>
+                <span>📑</span> Generate Summary
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Generated Reports History -->
+<div class="reports-history">
+    <div class="reports-history-header">
+        <h3>📁 Generated Reports</h3>
+        <button class="btn btn-ghost btn-sm" onclick="loadReportsList()">↻ Refresh</button>
+    </div>
+    <div class="reports-list" id="reports-list">
+        <div class="no-reports">
+            <div class="no-reports-icon">📄</div>
+            <p>No reports generated yet</p>
+        </div>
+    </div>
+</div>
+
+<script>
+// State
+let selectedCaseIds = [];
+let allCases = [];
+
+// Load cases for dropdowns
+async function loadCases() {
+    try {
+        const response = await fetch('/api/v2/cases?page_size=500&show_archived=0');
+        if (!response.ok) {
+            throw new Error(`Failed to load cases: ${response.status}`);
+        }
+        const data = await response.json();
+        allCases = data.cases || [];
+        
+        console.log(`Loaded ${allCases.length} cases for reports`);
+        
+        // Populate deal summary dropdown
+        const select = document.getElementById('deal-case-select');
+        select.innerHTML = '<option value="">Select a case...</option>';
+        
+        allCases.forEach(c => {
+            const addr = c.address_override || c.address || 'No address';
+            const caseLabel = c.case_number || ('Case ' + c.id);
+            const option = document.createElement('option');
+            option.value = c.id;
+            option.textContent = `${caseLabel} - ${addr.substring(0, 30)}`;
+            select.appendChild(option);
+        });
+        
+        console.log(`Populated dropdown with ${allCases.length} options`);
+    } catch (error) {
+        console.error('Failed to load cases:', error);
+        const select = document.getElementById('deal-case-select');
+        select.innerHTML = '<option value="">Error loading cases</option>';
+    }
+}
+
+// Case search for ROI report
+document.getElementById('roi-case-search').addEventListener('input', function(e) {
+    const query = e.target.value.toLowerCase();
+    const resultsDiv = document.getElementById('case-search-results');
+    
+    if (query.length < 2) {
+        resultsDiv.style.display = 'none';
+        return;
+    }
+    
+    const matches = allCases.filter(c => {
+        const caseNum = (c.case_number || '').toLowerCase();
+        const addr = (c.address_override || c.address || '').toLowerCase();
+        return (caseNum.includes(query) || addr.includes(query)) && !selectedCaseIds.includes(c.id);
+    }).slice(0, 10);
+    
+    if (matches.length === 0) {
+        resultsDiv.innerHTML = '<div style="padding: 12px; color: var(--text-muted);">No matching cases</div>';
+    } else {
+        resultsDiv.innerHTML = matches.map(c => {
+            const addr = c.address_override || c.address || 'No address';
+            return `<div style="padding: 10px 12px; cursor: pointer; border-bottom: 1px solid var(--border);" 
+                        onmouseover="this.style.background='var(--bg-alt)'" 
+                        onmouseout="this.style.background=''" 
+                        onclick="selectCase(${c.id}, '${(c.case_number || 'Case ' + c.id).replace(/'/g, "\\'")}')">
+                <div style="font-weight: 500;">${c.case_number || 'Case ' + c.id}</div>
+                <div style="font-size: 12px; color: var(--text-muted);">${addr.substring(0, 40)}</div>
+            </div>`;
+        }).join('');
+    }
+    
+    resultsDiv.style.display = 'block';
+});
+
+function selectCase(id, label) {
+    if (!selectedCaseIds.includes(id)) {
+        selectedCaseIds.push(id);
+        renderSelectedCases();
+    }
+    document.getElementById('roi-case-search').value = '';
+    document.getElementById('case-search-results').style.display = 'none';
+}
+
+function removeSelectedCase(id) {
+    selectedCaseIds = selectedCaseIds.filter(cid => cid !== id);
+    renderSelectedCases();
+}
+
+function renderSelectedCases() {
+    const container = document.getElementById('selected-cases-container');
+    container.innerHTML = selectedCaseIds.map(id => {
+        const c = allCases.find(c => c.id === id);
+        const label = c ? (c.case_number || 'Case ' + c.id) : 'Case ' + id;
+        return `<span class="selected-case-tag">
+            ${label}
+            <button onclick="removeSelectedCase(${id})">×</button>
+        </span>`;
+    }).join('');
+}
+
+// Generate Portfolio Report
+async function generatePortfolioReport() {
+    const btn = event.target.closest('.btn-generate');
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner"></div> Generating...';
+    
+    try {
+        const response = await fetch('/api/v2/reports/portfolio', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                start_date: document.getElementById('portfolio-start-date').value || null,
+                end_date: document.getElementById('portfolio-end-date').value || null,
+                include_charts: document.getElementById('portfolio-include-charts').checked,
+                include_case_details: document.getElementById('portfolio-include-details').checked
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok && result.status === 'success') {
+            btn.classList.add('success');
+            btn.innerHTML = '✅ Report Generated!';
+            
+            // Download the file
+            window.location.href = result.download_url;
+            
+            // Refresh list
+            setTimeout(() => loadReportsList(), 500);
+        } else {
+            throw new Error(result.detail || 'Failed to generate report');
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    } finally {
+        setTimeout(() => {
+            btn.disabled = false;
+            btn.classList.remove('success');
+            btn.innerHTML = '<span>📄</span> Generate Report';
+        }, 3000);
+    }
+}
+
+// Generate ROI Report
+async function generateROIReport() {
+    if (selectedCaseIds.length === 0) {
+        alert('Please select at least one case');
+        return;
+    }
+    
+    const btn = event.target.closest('.btn-generate');
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner"></div> Generating...';
+    
+    try {
+        const response = await fetch('/api/v2/reports/roi-projection', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ case_ids: selectedCaseIds })
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok && result.status === 'success') {
+            btn.classList.add('success');
+            btn.innerHTML = '✅ Report Generated!';
+            window.location.href = result.download_url;
+            setTimeout(() => loadReportsList(), 500);
+        } else {
+            throw new Error(result.detail || 'Failed to generate report');
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    } finally {
+        setTimeout(() => {
+            btn.disabled = false;
+            btn.classList.remove('success');
+            btn.innerHTML = '<span>📈</span> Generate ROI Report';
+        }, 3000);
+    }
+}
+
+// Generate Deal Summary
+async function generateDealSummary() {
+    const caseId = document.getElementById('deal-case-select').value;
+    if (!caseId) {
+        alert('Please select a case');
+        return;
+    }
+    
+    const btn = event.target.closest('.btn-generate');
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner"></div> Generating...';
+    
+    try {
+        const response = await fetch(`/api/v2/reports/deal-summary/${caseId}`, {
+            method: 'POST'
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok && result.status === 'success') {
+            btn.classList.add('success');
+            btn.innerHTML = '✅ Report Generated!';
+            window.location.href = result.download_url;
+            setTimeout(() => loadReportsList(), 500);
+        } else {
+            throw new Error(result.detail || 'Failed to generate report');
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    } finally {
+        setTimeout(() => {
+            btn.disabled = false;
+            btn.classList.remove('success');
+            btn.innerHTML = '<span>📑</span> Generate Summary';
+        }, 3000);
+    }
+}
+
+// Load reports list
+async function loadReportsList() {
+    try {
+        const response = await fetch('/api/v2/reports/list');
+        const data = await response.json();
+        
+        const container = document.getElementById('reports-list');
+        
+        if (!data.reports || data.reports.length === 0) {
+            container.innerHTML = `
+                <div class="no-reports">
+                    <div class="no-reports-icon">📄</div>
+                    <p>No reports generated yet</p>
+                </div>
+            `;
+            return;
+        }
+        
+        container.innerHTML = data.reports.map(r => `
+            <div class="report-item">
+                <div class="report-item-icon">📑</div>
+                <div class="report-item-info">
+                    <div class="report-item-name">${r.filename}</div>
+                    <div class="report-item-meta">${r.size_formatted} • ${r.created}</div>
+                </div>
+                <div class="report-item-actions">
+                    <a href="${r.download_url}" class="btn-download" download>⬇️ Download</a>
+                    <button class="btn-delete" onclick="deleteReport('${r.filename}')">🗑️</button>
+                </div>
+            </div>
+        `).join('');
+        
+    } catch (error) {
+        console.error('Failed to load reports:', error);
+    }
+}
+
+// Delete report
+async function deleteReport(filename) {
+    if (!confirm(`Delete "${filename}"?`)) return;
+    
+    try {
+        const response = await fetch(`/api/v2/reports/${encodeURIComponent(filename)}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            loadReportsList();
+        } else {
+            const result = await response.json();
+            alert('Failed to delete: ' + (result.detail || 'Unknown error'));
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+// Initialize
+document.addEventListener('DOMContentLoaded', function() {
+    loadCases();
+    loadReportsList();
+});
+</script>
+{% endblock %}
