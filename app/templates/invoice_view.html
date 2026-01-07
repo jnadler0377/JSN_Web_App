@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}Invoice {{ invoice.invoice_number }} - JSN Holdings{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
+    <div>
+        <h1 class="page-title">Invoice {{ invoice.invoice_number }}</h1>
+        <p class="page-subtitle">{{ invoice.invoice_date }}</p>
+    </div>
+    <div style="display: flex; gap: 8px;">
+        <a href="/billing" class="btn btn-ghost">← Back to Billing</a>
+        {% if invoice.status == 'pending' and invoice.stripe_hosted_url %}
+        <a href="{{ invoice.stripe_hosted_url }}" target="_blank" class="btn btn-primary">💳 Pay Now</a>
+        {% endif %}
+        <button class="btn btn-secondary" onclick="window.print()">🖨️ Print</button>
+    </div>
+</div>
+
+<!-- Invoice Card -->
+<div class="card" style="max-width: 800px; margin: 0 auto;">
+    <div class="card-body" style="padding: var(--space-xl);">
+        
+        <!-- Header -->
+        <div style="display: flex; justify-content: space-between; margin-bottom: var(--space-xl); padding-bottom: var(--space-lg); border-bottom: 2px solid var(--border);">
+            <div>
+                <h2 style="font-size: 28px; font-weight: 700; margin: 0 0 8px 0;">INVOICE</h2>
+                <div style="color: var(--text-muted);">{{ invoice.invoice_number }}</div>
+            </div>
+            <div style="text-align: right;">
+                <div style="font-size: 24px; font-weight: 700;">JSN Holdings</div>
+                <div style="color: var(--text-muted); font-size: 14px;">
+                    Foreclosure Case Management<br>
+                    support@jsnholdings.com
+                </div>
+            </div>
+        </div>
+        
+        <!-- Bill To & Invoice Info -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-xl); margin-bottom: var(--space-xl);">
+            <div>
+                <div style="font-size: 12px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px;">Bill To</div>
+                <div style="font-weight: 600;">{{ invoice.user.full_name or invoice.user.email }}</div>
+                <div style="color: var(--text-secondary);">{{ invoice.user.email }}</div>
+            </div>
+            <div style="text-align: right;">
+                <div style="margin-bottom: 12px;">
+                    <span style="color: var(--text-muted);">Invoice Date:</span>
+                    <strong>{{ invoice.invoice_date }}</strong>
+                </div>
+                <div style="margin-bottom: 12px;">
+                    <span style="color: var(--text-muted);">Due Date:</span>
+                    <strong>{{ invoice.due_date or 'Upon Receipt' }}</strong>
+                </div>
+                <div>
+                    <span style="color: var(--text-muted);">Status:</span>
+                    {% if invoice.status == 'paid' %}
+                    <span class="badge badge-success">PAID</span>
+                    {% elif invoice.status == 'pending' %}
+                    <span class="badge badge-warning">PENDING</span>
+                    {% elif invoice.status == 'failed' %}
+                    <span class="badge badge-danger">FAILED</span>
+                    {% else %}
+                    <span class="badge badge-neutral">{{ invoice.status|upper }}</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        
+        <!-- Line Items -->
+        <table class="table" style="margin-bottom: var(--space-xl);">
+            <thead>
+                <tr style="background: var(--bg-alt);">
+                    <th style="text-align: left;">Description</th>
+                    <th style="text-align: center; width: 80px;">Score</th>
+                    <th style="text-align: right; width: 100px;">Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for line in invoice.lines %}
+                <tr>
+                    <td>
+                        <div style="font-weight: 500;">{{ line.case_number }}</div>
+                        <div style="font-size: 13px; color: var(--text-muted);">
+                            {{ line.description.split(' - ')[1] if ' - ' in line.description else line.description }}
+                        </div>
+                    </td>
+                    <td style="text-align: center;">
+                        <span class="badge {% if line.score_at_invoice >= 80 %}badge-success{% elif line.score_at_invoice >= 60 %}badge-info{% elif line.score_at_invoice >= 40 %}badge-warning{% else %}badge-danger{% endif %}">
+                            {{ line.score_at_invoice }}
+                        </span>
+                    </td>
+                    <td style="text-align: right; font-weight: 500;">{{ line.amount_display }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        
+        <!-- Totals -->
+        <div style="display: flex; justify-content: flex-end;">
+            <div style="width: 250px;">
+                <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border);">
+                    <span style="color: var(--text-muted);">Subtotal</span>
+                    <span>{{ invoice.subtotal_display }}</span>
+                </div>
+                {% if invoice.tax_cents > 0 %}
+                <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border);">
+                    <span style="color: var(--text-muted);">Tax</span>
+                    <span>${{ (invoice.tax_cents / 100)|round(2) }}</span>
+                </div>
+                {% endif %}
+                <div style="display: flex; justify-content: space-between; padding: 12px 0; font-size: 20px; font-weight: 700;">
+                    <span>Total</span>
+                    <span style="color: var(--primary);">{{ invoice.total_display }}</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Payment Info -->
+        {% if invoice.status == 'pending' %}
+        <div style="margin-top: var(--space-xl); padding: var(--space-lg); background: var(--warning-light); border-radius: var(--radius-md); border-left: 4px solid var(--warning);">
+            <strong style="color: #b45309;">Payment Required</strong>
+            <p style="margin: 8px 0 0 0; color: var(--text-secondary);">
+                {% if invoice.stripe_hosted_url %}
+                Click the "Pay Now" button above to complete payment securely via Stripe.
+                {% else %}
+                Please contact support for payment instructions.
+                {% endif %}
+            </p>
+        </div>
+        {% elif invoice.status == 'paid' %}
+        <div style="margin-top: var(--space-xl); padding: var(--space-lg); background: var(--success-light); border-radius: var(--radius-md); border-left: 4px solid var(--success);">
+            <strong style="color: var(--success);">✓ Payment Received</strong>
+            {% if invoice.paid_at %}
+            <p style="margin: 8px 0 0 0; color: var(--text-secondary);">
+                Paid on {{ invoice.paid_at }}
+            </p>
+            {% endif %}
+        </div>
+        {% endif %}
+        
+    </div>
+</div>
+
+<style>
+.badge-success { background: var(--success-light); color: var(--success); padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+.badge-warning { background: var(--warning-light); color: #b45309; padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+.badge-danger { background: var(--danger-light); color: var(--danger); padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+.badge-info { background: var(--info-light); color: var(--info); padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+.badge-neutral { background: var(--bg-alt); color: var(--text-muted); padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+
+@media print {
+    .page-header .btn { display: none !important; }
+    .card { box-shadow: none !important; border: 1px solid #ddd !important; }
+}
+</style>
+{% endblock %}

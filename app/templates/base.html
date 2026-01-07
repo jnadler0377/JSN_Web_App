@@ -1,39 +1,21 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{% block title %}JSN Holdings Foreclosure Manager{% endblock %}</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}JSN Holdings{% endblock %}</title>
+    
+    <!-- Styles -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
     <style>
-        /* ========================================
-           CSS VARIABLES - DESIGN SYSTEM
-           ======================================== */
         :root {
-            /* Primary Colors - matching login gradient */
             --primary: #667eea;
             --primary-dark: #5a67d8;
-            --primary-light: #a3bffa;
-            --secondary: #764ba2;
-            --gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            
-            /* Neutrals */
-            --bg: #f8fafc;
-            --bg-alt: #f1f5f9;
-            --surface: #ffffff;
-            --surface-hover: #f8fafc;
-            --border: #e2e8f0;
-            --border-light: #f1f5f9;
-            
-            /* Text */
-            --text: #1e293b;
-            --text-secondary: #64748b;
-            --text-muted: #94a3b8;
-            
-            /* Status Colors */
+            --primary-light: #818cf8;
+            --secondary: #64748b;
             --success: #10b981;
             --success-light: #d1fae5;
             --warning: #f59e0b;
@@ -43,57 +25,51 @@
             --info: #3b82f6;
             --info-light: #dbeafe;
             
-            /* Spacing */
+            --bg: #f8fafc;
+            --bg-alt: #f1f5f9;
+            --surface: #ffffff;
+            --border: #e2e8f0;
+            --border-light: #f1f5f9;
+            
+            --text: #1e293b;
+            --text-secondary: #475569;
+            --text-muted: #94a3b8;
+            
             --space-xs: 4px;
             --space-sm: 8px;
             --space-md: 16px;
             --space-lg: 24px;
             --space-xl: 32px;
-            --space-2xl: 48px;
             
-            /* Radius */
-            --radius-sm: 6px;
-            --radius-md: 10px;
-            --radius-lg: 16px;
+            --radius-sm: 4px;
+            --radius-md: 8px;
+            --radius-lg: 12px;
             --radius-full: 9999px;
             
-            /* Shadows */
-            --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-            --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1);
+            --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1);
             
-            /* Transitions */
-            --transition: all 0.2s ease;
-            --transition-slow: all 0.3s ease;
+            --transition: all 0.15s ease;
+            
+            --sidebar-width: 240px;
         }
-
-        /* ========================================
-           RESET & BASE
-           ======================================== */
-        *, *::before, *::after {
+        
+        * {
             box-sizing: border-box;
             margin: 0;
             padding: 0;
         }
         
-        html {
-            font-size: 16px;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
-        }
-        
         body {
-            font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: var(--bg);
             color: var(--text);
-            line-height: 1.6;
+            line-height: 1.5;
             min-height: 100vh;
         }
-
-        /* ========================================
-           LAYOUT
-           ======================================== */
+        
+        /* Layout */
         .app-layout {
             display: flex;
             min-height: 100vh;
@@ -101,17 +77,17 @@
         
         /* Sidebar */
         .sidebar {
-            width: 260px;
+            width: var(--sidebar-width);
             background: var(--surface);
             border-right: 1px solid var(--border);
-            display: flex;
-            flex-direction: column;
             position: fixed;
             top: 0;
             left: 0;
             height: 100vh;
+            overflow-y: auto;
             z-index: 100;
-            transition: transform 0.3s ease;
+            display: flex;
+            flex-direction: column;
         }
         
         .sidebar-header {
@@ -119,43 +95,19 @@
             border-bottom: 1px solid var(--border);
         }
         
-        .logo {
-            display: flex;
-            align-items: center;
-            gap: var(--space-sm);
+        .sidebar-logo {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--primary);
             text-decoration: none;
-            color: var(--text);
-        }
-        
-        .logo-icon {
-            width: 40px;
-            height: 40px;
-            background: var(--gradient);
-            border-radius: var(--radius-md);
             display: flex;
             align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: 700;
-            font-size: 18px;
-        }
-        
-        .logo-text {
-            font-weight: 700;
-            font-size: 18px;
-        }
-        
-        .logo-subtitle {
-            font-size: 11px;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
+            gap: 8px;
         }
         
         .sidebar-nav {
             flex: 1;
             padding: var(--space-md);
-            overflow-y: auto;
         }
         
         .nav-section {
@@ -165,25 +117,23 @@
         .nav-section-title {
             font-size: 11px;
             font-weight: 600;
-            color: var(--text-muted);
             text-transform: uppercase;
-            letter-spacing: 0.5px;
-            padding: 0 var(--space-sm);
-            margin-bottom: var(--space-sm);
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            padding: var(--space-sm) var(--space-md);
         }
         
         .nav-link {
             display: flex;
             align-items: center;
-            gap: var(--space-sm);
-            padding: var(--space-sm) var(--space-md);
+            gap: 12px;
+            padding: 10px var(--space-md);
             color: var(--text-secondary);
             text-decoration: none;
             border-radius: var(--radius-md);
             font-size: 14px;
             font-weight: 500;
             transition: var(--transition);
-            margin-bottom: 2px;
         }
         
         .nav-link:hover {
@@ -192,7 +142,7 @@
         }
         
         .nav-link.active {
-            background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
             color: var(--primary);
         }
         
@@ -202,29 +152,33 @@
             flex-shrink: 0;
         }
         
+        .nav-badge {
+            margin-left: auto;
+            background: var(--primary);
+            color: white;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: var(--radius-full);
+        }
+        
         .sidebar-footer {
             padding: var(--space-md);
             border-top: 1px solid var(--border);
         }
         
-        .user-menu {
+        .user-info {
             display: flex;
             align-items: center;
-            gap: var(--space-sm);
+            gap: 12px;
             padding: var(--space-sm);
-            border-radius: var(--radius-md);
-            transition: var(--transition);
-        }
-        
-        .user-menu:hover {
-            background: var(--bg-alt);
         }
         
         .user-avatar {
             width: 36px;
             height: 36px;
-            background: var(--gradient);
-            border-radius: var(--radius-full);
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -233,18 +187,9 @@
             font-size: 14px;
         }
         
-        .user-info {
-            flex: 1;
-            min-width: 0;
-        }
-        
         .user-name {
+            font-weight: 500;
             font-size: 14px;
-            font-weight: 600;
-            color: var(--text);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
         }
         
         .user-role {
@@ -252,59 +197,15 @@
             color: var(--text-muted);
         }
         
-        /* Main Content */
+        /* Main content */
         .main-content {
             flex: 1;
-            margin-left: 260px;
+            margin-left: var(--sidebar-width);
+            padding: var(--space-xl);
             min-height: 100vh;
         }
         
-        .topbar {
-            background: var(--surface);
-            border-bottom: 1px solid var(--border);
-            padding: var(--space-md) var(--space-xl);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            position: sticky;
-            top: 0;
-            z-index: 50;
-        }
-        
-        .topbar-left {
-            display: flex;
-            align-items: center;
-            gap: var(--space-md);
-        }
-        
-        .breadcrumb {
-            display: flex;
-            align-items: center;
-            gap: var(--space-sm);
-            font-size: 14px;
-            color: var(--text-muted);
-        }
-        
-        .breadcrumb a {
-            color: var(--text-secondary);
-            text-decoration: none;
-        }
-        
-        .breadcrumb a:hover {
-            color: var(--primary);
-        }
-        
-        .topbar-right {
-            display: flex;
-            align-items: center;
-            gap: var(--space-md);
-        }
-        
-        .page-content {
-            padding: var(--space-xl);
-            max-width: 1400px;
-        }
-        
+        /* Page header */
         .page-header {
             margin-bottom: var(--space-xl);
         }
@@ -312,341 +213,65 @@
         .page-title {
             font-size: 28px;
             font-weight: 700;
-            color: var(--text);
-            margin-bottom: var(--space-xs);
+            margin-bottom: 4px;
         }
         
         .page-subtitle {
-            color: var(--text-secondary);
-            font-size: 15px;
-        }
-
-        /* ========================================
-           CARDS
-           ======================================== */
-        .card {
-            background: var(--surface);
-            border-radius: var(--radius-lg);
-            border: 1px solid var(--border);
-            box-shadow: var(--shadow-sm);
-            transition: var(--transition);
+            color: var(--text-muted);
+            font-size: 14px;
         }
         
-        .card:hover {
-            box-shadow: var(--shadow-md);
+        /* Cards */
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-sm);
         }
         
         .card-header {
-            padding: var(--space-lg);
-            border-bottom: 1px solid var(--border);
             display: flex;
-            align-items: center;
             justify-content: space-between;
+            align-items: center;
+            padding: var(--space-md) var(--space-lg);
+            border-bottom: 1px solid var(--border);
         }
         
         .card-title {
             font-size: 16px;
             font-weight: 600;
-            color: var(--text);
         }
         
         .card-body {
             padding: var(--space-lg);
         }
         
-        .card-footer {
-            padding: var(--space-md) var(--space-lg);
-            border-top: 1px solid var(--border);
-            background: var(--bg-alt);
-            border-radius: 0 0 var(--radius-lg) var(--radius-lg);
-        }
-
-        /* ========================================
-           BUTTONS
-           ======================================== */
-        .btn {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: var(--space-sm);
-            padding: 10px 18px;
-            font-size: 14px;
-            font-weight: 600;
-            font-family: inherit;
-            border: none;
-            border-radius: var(--radius-md);
-            cursor: pointer;
-            text-decoration: none;
-            transition: var(--transition);
-            white-space: nowrap;
-        }
-        
-        .btn-primary {
-            background: var(--gradient);
-            color: white;
-        }
-        
-        .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
-        }
-        
-        .btn-secondary {
-            background: var(--bg-alt);
-            color: var(--text);
-            border: 1px solid var(--border);
-        }
-        
-        .btn-secondary:hover {
-            background: var(--bg);
-            border-color: var(--text-muted);
-        }
-        
-        .btn-ghost {
-            background: transparent;
-            color: var(--text-secondary);
-        }
-        
-        .btn-ghost:hover {
-            background: var(--bg-alt);
-            color: var(--text);
-        }
-        
-        .btn-danger {
-            background: var(--danger);
-            color: white;
-        }
-        
-        .btn-danger:hover {
-            background: #dc2626;
-        }
-        
-        .btn-sm {
-            padding: 6px 12px;
-            font-size: 13px;
-        }
-        
-        .btn-lg {
-            padding: 14px 24px;
-            font-size: 16px;
-        }
-        
-        .btn-icon {
-            padding: 8px;
-            border-radius: var(--radius-md);
-        }
-
-        /* ========================================
-           FORMS
-           ======================================== */
-        .form-group {
-            margin-bottom: var(--space-lg);
-        }
-        
-        .form-label {
-            display: block;
-            font-size: 14px;
-            font-weight: 500;
-            color: var(--text);
-            margin-bottom: var(--space-sm);
-        }
-        
-        .form-control {
-            width: 100%;
-            padding: 10px 14px;
-            font-size: 14px;
-            font-family: inherit;
-            border: 2px solid var(--border);
-            border-radius: var(--radius-md);
-            background: var(--surface);
-            color: var(--text);
-            transition: var(--transition);
-        }
-        
-        .form-control:focus {
-            outline: none;
-            border-color: var(--primary);
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-        }
-        
-        .form-control::placeholder {
-            color: var(--text-muted);
-        }
-        
-        select.form-control {
-            cursor: pointer;
-        }
-        
-        textarea.form-control {
-            resize: vertical;
-            min-height: 100px;
-        }
-        
-        .form-hint {
-            font-size: 12px;
-            color: var(--text-muted);
-            margin-top: var(--space-xs);
-        }
-        
-        .form-row {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: var(--space-md);
-        }
-
-        /* ========================================
-           TABLES
-           ======================================== */
-        .table-container {
-            overflow-x: auto;
-            background: var(--surface);
-            border-radius: var(--radius-lg);
-            border: 1px solid var(--border);
-        }
-        
-        .table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 14px;
-        }
-        
-        .table th {
-            background: var(--bg-alt);
-            padding: var(--space-md);
-            text-align: left;
-            font-weight: 600;
-            color: var(--text-secondary);
-            font-size: 12px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            border-bottom: 1px solid var(--border);
-        }
-        
-        .table td {
-            padding: var(--space-md);
-            border-bottom: 1px solid var(--border-light);
-            color: var(--text);
-        }
-        
-        .table tbody tr {
-            transition: var(--transition);
-        }
-        
-        .table tbody tr:hover {
-            background: var(--bg-alt);
-        }
-        
-        .table tbody tr:last-child td {
-            border-bottom: none;
-        }
-
-        /* ========================================
-           BADGES & PILLS
-           ======================================== */
-        .badge {
-            display: inline-flex;
-            align-items: center;
-            padding: 4px 10px;
-            font-size: 12px;
-            font-weight: 600;
-            border-radius: var(--radius-full);
-            white-space: nowrap;
-        }
-        
-        .badge-primary {
-            background: rgba(102, 126, 234, 0.1);
-            color: var(--primary);
-        }
-        
-        .badge-success {
-            background: var(--success-light);
-            color: var(--success);
-        }
-        
-        .badge-warning {
-            background: var(--warning-light);
-            color: #b45309;
-        }
-        
-        .badge-danger {
-            background: var(--danger-light);
-            color: var(--danger);
-        }
-        
-        .badge-neutral {
-            background: var(--bg-alt);
-            color: var(--text-secondary);
-        }
-
-        /* ========================================
-           ALERTS
-           ======================================== */
-        .alert {
-            padding: var(--space-md);
-            border-radius: var(--radius-md);
-            font-size: 14px;
-            margin-bottom: var(--space-md);
-            display: flex;
-            align-items: flex-start;
-            gap: var(--space-sm);
-        }
-        
-        .alert-success {
-            background: var(--success-light);
-            color: #065f46;
-            border-left: 4px solid var(--success);
-        }
-        
-        .alert-warning {
-            background: var(--warning-light);
-            color: #92400e;
-            border-left: 4px solid var(--warning);
-        }
-        
-        .alert-danger {
-            background: var(--danger-light);
-            color: #991b1b;
-            border-left: 4px solid var(--danger);
-        }
-        
-        .alert-info {
-            background: var(--info-light);
-            color: #1e40af;
-            border-left: 4px solid var(--info);
-        }
-
-        /* ========================================
-           STATS CARDS
-           ======================================== */
+        /* Stats Grid */
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: var(--space-md);
             margin-bottom: var(--space-xl);
         }
         
         .stat-card {
             background: var(--surface);
+            border: 1px solid var(--border);
             border-radius: var(--radius-lg);
             padding: var(--space-lg);
-            border: 1px solid var(--border);
-            transition: var(--transition);
-        }
-        
-        .stat-card:hover {
-            box-shadow: var(--shadow-md);
-            transform: translateY(-2px);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
         }
         
         .stat-icon {
-            width: 48px;
-            height: 48px;
+            width: 40px;
+            height: 40px;
             border-radius: var(--radius-md);
             display: flex;
             align-items: center;
             justify-content: center;
-            margin-bottom: var(--space-md);
-            font-size: 24px;
+            font-size: 20px;
         }
         
         .stat-icon.purple {
@@ -659,35 +284,31 @@
             color: var(--success);
         }
         
-        .stat-icon.orange {
-            background: var(--warning-light);
-            color: var(--warning);
-        }
-        
         .stat-icon.blue {
             background: var(--info-light);
             color: var(--info);
+        }
+        
+        .stat-icon.orange {
+            background: var(--warning-light);
+            color: var(--warning);
         }
         
         .stat-value {
             font-size: 28px;
             font-weight: 700;
             color: var(--text);
-            line-height: 1.2;
         }
         
         .stat-label {
-            font-size: 14px;
-            color: var(--text-secondary);
-            margin-top: var(--space-xs);
+            font-size: 13px;
+            color: var(--text-muted);
+            font-weight: 500;
         }
         
         .stat-change {
-            font-size: 13px;
-            margin-top: var(--space-sm);
-            display: flex;
-            align-items: center;
-            gap: 4px;
+            font-size: 12px;
+            color: var(--text-muted);
         }
         
         .stat-change.positive {
@@ -697,268 +318,14 @@
         .stat-change.negative {
             color: var(--danger);
         }
-
-        /* ========================================
-           PAGINATION
-           ======================================== */
-        .pagination {
-            display: flex;
-            align-items: center;
-            gap: var(--space-sm);
-            margin-top: var(--space-lg);
-        }
         
-        .pagination a,
-        .pagination span {
-            padding: 8px 14px;
-            font-size: 14px;
-            border-radius: var(--radius-md);
-            text-decoration: none;
-            transition: var(--transition);
-        }
-        
-        .pagination a {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            color: var(--text);
-        }
-        
-        .pagination a:hover {
-            background: var(--bg-alt);
-            border-color: var(--primary);
-            color: var(--primary);
-        }
-        
-        .pagination .active {
-            background: var(--gradient);
-            color: white;
-            border: none;
-        }
-        
-        .pagination .disabled {
-            background: var(--bg-alt);
-            color: var(--text-muted);
-            cursor: not-allowed;
-        }
-
-        /* ========================================
-           NOTIFICATION BELL (V2.0)
-           ======================================== */
-        .notification-bell {
-            position: relative;
-            padding: 8px;
-            border-radius: var(--radius-md);
-            cursor: pointer;
-            transition: var(--transition);
-        }
-        
-        .notification-bell:hover {
-            background: var(--bg-alt);
-        }
-        
-        .notification-bell svg {
-            width: 22px;
-            height: 22px;
-            color: var(--text-secondary);
-        }
-        
-        .notification-badge {
-            position: absolute;
-            top: 4px;
-            right: 4px;
-            width: 18px;
-            height: 18px;
-            background: var(--danger);
-            color: white;
-            font-size: 11px;
-            font-weight: 600;
-            border-radius: var(--radius-full);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .notification-badge:empty,
-        .notification-badge[data-count="0"] {
-            display: none;
-        }
-        
-        .notification-dropdown {
-            position: absolute;
-            top: calc(100% + 8px);
-            right: 0;
-            width: 360px;
-            background: var(--surface);
-            border-radius: var(--radius-lg);
-            box-shadow: var(--shadow-xl);
-            border: 1px solid var(--border);
-            z-index: 1000;
-            display: none;
-        }
-        
-        .notification-dropdown.show {
-            display: block;
-            animation: slideDown 0.2s ease;
-        }
-        
-        @keyframes slideDown {
-            from {
-                opacity: 0;
-                transform: translateY(-10px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-        
-        .notification-header {
-            padding: var(--space-md);
-            border-bottom: 1px solid var(--border);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-        
-        .notification-header h4 {
-            font-size: 14px;
-            font-weight: 600;
-        }
-        
-        .notification-list {
-            max-height: 320px;
-            overflow-y: auto;
-        }
-        
-        .notification-item {
-            padding: var(--space-md);
-            border-bottom: 1px solid var(--border-light);
-            cursor: pointer;
-            transition: var(--transition);
-        }
-        
-        .notification-item:hover {
-            background: var(--bg-alt);
-        }
-        
-        .notification-item.unread {
-            background: rgba(102, 126, 234, 0.05);
-        }
-        
-        .notification-item:last-child {
-            border-bottom: none;
-        }
-
-        /* ========================================
-           TOAST NOTIFICATIONS
-           ======================================== */
-        .toast-container {
-            position: fixed;
-            bottom: var(--space-lg);
-            right: var(--space-lg);
-            z-index: 9999;
-            display: flex;
-            flex-direction: column;
-            gap: var(--space-sm);
-        }
-        
-        .toast {
-            background: var(--surface);
-            border-radius: var(--radius-md);
-            padding: var(--space-md) var(--space-lg);
-            box-shadow: var(--shadow-lg);
-            border: 1px solid var(--border);
-            display: flex;
-            align-items: center;
-            gap: var(--space-sm);
-            min-width: 300px;
-            animation: slideIn 0.3s ease;
-        }
-        
-        @keyframes slideIn {
-            from {
-                opacity: 0;
-                transform: translateX(100%);
-            }
-            to {
-                opacity: 1;
-                transform: translateX(0);
-            }
-        }
-        
-        .toast-success {
-            border-left: 4px solid var(--success);
-        }
-        
-        .toast-error {
-            border-left: 4px solid var(--danger);
-        }
-        
-        .toast-warning {
-            border-left: 4px solid var(--warning);
-        }
-        
-        .toast-info {
-            border-left: 4px solid var(--info);
-        }
-
-        /* ========================================
-           TABS
-           ======================================== */
-        .tabs {
-            display: flex;
-            gap: 4px;
-            border-bottom: 1px solid var(--border);
-            margin-bottom: var(--space-lg);
-        }
-        
-        .tab {
-            padding: var(--space-md) var(--space-lg);
-            font-size: 14px;
-            font-weight: 500;
-            color: var(--text-secondary);
-            text-decoration: none;
-            border-bottom: 2px solid transparent;
-            margin-bottom: -1px;
-            transition: var(--transition);
-            cursor: pointer;
-        }
-        
-        .tab:hover {
-            color: var(--text);
-        }
-        
-        .tab.active {
-            color: var(--primary);
-            border-bottom-color: var(--primary);
-        }
-        
-        .tab-content {
-            display: none;
-        }
-        
-        .tab-content.active {
-            display: block;
-            animation: fadeIn 0.2s ease;
-        }
-        
-        @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-        }
-
-        /* ========================================
-           SCORE BADGES (Deal Analysis)
-           ======================================== */
+        /* Deal Score Badges */
         .deal-score-badge {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            width: 42px;
-            height: 28px;
-            border-radius: var(--radius-md);
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: var(--radius-full);
             font-size: 13px;
-            font-weight: 700;
+            font-weight: 600;
         }
         
         .deal-score-badge.excellent {
@@ -980,257 +347,285 @@
             background: var(--danger-light);
             color: var(--danger);
         }
-
-        /* ========================================
-           UTILITY CLASSES
-           ======================================== */
-        .text-center { text-align: center; }
-        .text-right { text-align: right; }
-        .text-muted { color: var(--text-muted); }
-        .text-success { color: var(--success); }
-        .text-danger { color: var(--danger); }
-        .text-warning { color: var(--warning); }
         
-        .mt-sm { margin-top: var(--space-sm); }
-        .mt-md { margin-top: var(--space-md); }
-        .mt-lg { margin-top: var(--space-lg); }
-        .mb-sm { margin-bottom: var(--space-sm); }
-        .mb-md { margin-bottom: var(--space-md); }
-        .mb-lg { margin-bottom: var(--space-lg); }
-        
-        .flex { display: flex; }
-        .flex-wrap { flex-wrap: wrap; }
-        .items-center { align-items: center; }
-        .justify-between { justify-content: space-between; }
-        .gap-sm { gap: var(--space-sm); }
-        .gap-md { gap: var(--space-md); }
-        
-        .hidden { display: none !important; }
-        
-        .truncate {
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        /* ========================================
-           RESPONSIVE
-           ======================================== */
-        @media (max-width: 1024px) {
-            .sidebar {
-                transform: translateX(-100%);
-            }
-            
-            .sidebar.open {
-                transform: translateX(0);
-            }
-            
-            .main-content {
-                margin-left: 0;
-            }
-            
-            .mobile-menu-btn {
-                display: flex;
-            }
-        }
-        
-        .mobile-menu-btn {
-            display: none;
-            padding: 8px;
-            background: none;
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 8px 16px;
+            font-size: 14px;
+            font-weight: 500;
+            border-radius: var(--radius-md);
             border: none;
             cursor: pointer;
-        }
-
-        /* Legacy compatibility */
-        input[type="text"],
-        input[type="email"],
-        input[type="password"],
-        input[type="number"],
-        input[type="date"],
-        input[type="search"],
-        select,
-        textarea {
-            width: 100%;
-            padding: 10px 14px;
-            font-size: 14px;
-            font-family: inherit;
-            border: 2px solid var(--border);
-            border-radius: var(--radius-md);
-            background: var(--surface);
-            color: var(--text);
+            text-decoration: none;
             transition: var(--transition);
         }
         
-        input:focus,
-        select:focus,
-        textarea:focus {
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: var(--primary-dark);
+        }
+        
+        .btn-secondary {
+            background: var(--bg-alt);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+        
+        .btn-secondary:hover {
+            background: var(--border);
+        }
+        
+        .btn-ghost {
+            background: transparent;
+            color: var(--text-secondary);
+        }
+        
+        .btn-ghost:hover {
+            background: var(--bg-alt);
+        }
+        
+        .btn-danger {
+            background: var(--danger);
+            color: white;
+        }
+        
+        .btn-sm {
+            padding: 4px 12px;
+            font-size: 13px;
+        }
+        
+        /* Forms */
+        .form-group {
+            margin-bottom: var(--space-md);
+        }
+        
+        .form-label {
+            display: block;
+            font-size: 13px;
+            font-weight: 500;
+            margin-bottom: 6px;
+            color: var(--text-secondary);
+        }
+        
+        .form-control {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            font-size: 14px;
+            transition: var(--transition);
+        }
+        
+        .form-control:focus {
             outline: none;
             border-color: var(--primary);
             box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
         }
         
-        button {
-            font-family: inherit;
+        /* Tables */
+        .table {
+            width: 100%;
+            border-collapse: collapse;
         }
         
-        label {
-            display: block;
-            font-size: 14px;
-            font-weight: 500;
-            color: var(--text);
-            margin-bottom: var(--space-sm);
+        .table th,
+        .table td {
+            padding: 12px 16px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
         }
         
-        h1, h2, h3, h4, h5, h6 {
-            color: var(--text);
-            font-weight: 700;
-            line-height: 1.3;
-        }
-        
-        h1 { font-size: 32px; }
-        h2 { font-size: 24px; margin-bottom: var(--space-lg); }
-        h3 { font-size: 18px; margin-bottom: var(--space-md); }
-        h4 { font-size: 16px; }
-        
-        a {
-            color: var(--primary);
-            text-decoration: none;
-        }
-        
-        a:hover {
-            text-decoration: underline;
-        }
-        
-        p {
-            margin-bottom: var(--space-md);
-        }
-        
-        ul, ol {
-            padding-left: var(--space-lg);
-            margin-bottom: var(--space-md);
-        }
-        
-        .muted {
-            color: var(--text-muted);
-            font-size: 13px;
-        }
-        
-        .error {
-            background: var(--danger-light);
-            color: #991b1b;
-            padding: var(--space-md);
-            border-radius: var(--radius-md);
-            margin-bottom: var(--space-md);
-            border-left: 4px solid var(--danger);
-        }
-        
-        .success {
-            background: var(--success-light);
-            color: #065f46;
-            padding: var(--space-md);
-            border-radius: var(--radius-md);
-            margin-bottom: var(--space-md);
-            border-left: 4px solid var(--success);
-        }
-
-        /* Pill styles for backward compatibility */
-        .pill {
-            display: inline-flex;
-            align-items: center;
-            padding: 4px 10px;
+        .table th {
             font-size: 12px;
             font-weight: 600;
-            border-radius: var(--radius-full);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
             background: var(--bg-alt);
-            color: var(--text-secondary);
         }
         
-        .pill-tag {
+        .table tbody tr:hover {
+            background: var(--bg-alt);
+        }
+        
+        /* Badges */
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            font-size: 12px;
+            font-weight: 500;
+            border-radius: var(--radius-full);
+        }
+        
+        .badge-success {
             background: var(--success-light);
             color: var(--success);
         }
         
-        .pill-warn {
+        .badge-warning {
             background: var(--warning-light);
             color: #b45309;
         }
+        
+        .badge-danger {
+            background: var(--danger-light);
+            color: var(--danger);
+        }
+        
+        .badge-info {
+            background: var(--info-light);
+            color: var(--info);
+        }
+        
+        .badge-neutral {
+            background: var(--bg-alt);
+            color: var(--text-muted);
+        }
+        
+        /* Text utilities */
+        .text-primary { color: var(--primary); }
+        .text-muted { color: var(--text-muted); }
+        .text-success { color: var(--success); }
+        .text-danger { color: var(--danger); }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            .sidebar {
+                transform: translateX(-100%);
+            }
+            
+            .main-content {
+                margin-left: 0;
+            }
+        }
+        
+        /* Spinner */
+        .spinner {
+            width: 24px;
+            height: 24px;
+            border: 3px solid var(--border);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        /* Alert */
+        .alert {
+            padding: var(--space-md);
+            border-radius: var(--radius-md);
+            margin-bottom: var(--space-md);
+        }
+        
+        .alert-danger {
+            background: var(--danger-light);
+            color: var(--danger);
+            border: 1px solid var(--danger);
+        }
+        
+        .alert-warning {
+            background: var(--warning-light);
+            color: #92400e;
+            border: 1px solid var(--warning);
+        }
+        
+        .alert-success {
+            background: var(--success-light);
+            color: var(--success);
+            border: 1px solid var(--success);
+        }
     </style>
+    
     {% block extra_css %}{% endblock %}
 </head>
 <body>
     <div class="app-layout">
-        <!-- Sidebar -->
+        <!-- Sidebar Navigation -->
         <aside class="sidebar">
             <div class="sidebar-header">
-                <a href="/analytics" class="logo">
-                    <div class="logo-icon">J</div>
-                    <div>
-                        <div class="logo-text">JSN Holdings</div>
-                        <div class="logo-subtitle">Foreclosure Manager</div>
-                    </div>
+                <a href="/" class="sidebar-logo">
+                    🏠 JSN Holdings
                 </a>
             </div>
             
             <nav class="sidebar-nav">
+                <!-- Main Section -->
                 <div class="nav-section">
                     <div class="nav-section-title">Main</div>
-                    <a href="/analytics" class="nav-link {% if request.path == '/analytics' %}active{% endif %}">
+                    
+                    <a href="/cases" class="nav-link {% if request.url.path == '/cases' or request.url.path.startswith('/cases/') %}active{% endif %}">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-                            <polyline points="9,22 9,12 15,12 15,22"/>
-                        </svg>
-                        Dashboard
-                    </a>
-                    <a href="/cases" class="nav-link {% if '/cases' in request.path and '/new' not in request.path %}active{% endif %}">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                            <polyline points="9 22 9 12 15 12 15 22"/>
                         </svg>
                         Cases
                     </a>
-                </div>
-                
-                <div class="nav-section">
-                    <div class="nav-section-title">Actions</div>
-                    <a href="/cases/new" class="nav-link {% if request.path == '/cases/new' %}active{% endif %}">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="12" cy="12" r="10"/>
-                            <line x1="12" y1="8" x2="12" y2="16"/>
-                            <line x1="8" y1="12" x2="16" y2="12"/>
-                        </svg>
-                        Add Case
-                    </a>
-                    <a href="/import" class="nav-link {% if request.path == '/import' %}active{% endif %}">
+                    
+                    {% set is_admin_user = current_user.is_admin if current_user and current_user.is_admin is defined else (current_user.get('is_admin', false) if current_user else false) %}
+                    {% if is_admin_user %}
+                    <a href="/import" class="nav-link {% if request.url.path == '/import' %}active{% endif %}">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                            <polyline points="17,8 12,3 7,8"/>
+                            <polyline points="17 8 12 3 7 8"/>
                             <line x1="12" y1="3" x2="12" y2="15"/>
                         </svg>
-                        Update Cases
+                        Import
                     </a>
-                    <a href="/reports" class="nav-link {% if request.path == '/reports' %}active{% endif %}">
+                    {% endif %}
+                    
+                    <a href="/billing" class="nav-link {% if request.url.path == '/billing' %}active{% endif %}">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                            <polyline points="14,2 14,8 20,8"/>
-                            <line x1="16" y1="13" x2="8" y2="13"/>
-                            <line x1="16" y1="17" x2="8" y2="17"/>
-                            <polyline points="10,9 9,9 8,9"/>
+                            <rect x="1" y="4" width="22" height="16" rx="2" ry="2"/>
+                            <line x1="1" y1="10" x2="23" y2="10"/>
                         </svg>
-                        Reports
+                        Billing
+                    </a>
+                    <a href="/analytics" class="nav-link {% if request.url.path == '/analytics' %}active{% endif %}">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="18" y1="20" x2="18" y2="10"/>
+                            <line x1="12" y1="20" x2="12" y2="4"/>
+                            <line x1="6" y1="20" x2="6" y2="14"/>
+                        </svg>
+                        Analytics
+                    </a>
+                    
+                </div>
+                
+                <!-- V3: Billing Section -->
+                <div class="nav-section">
+                    <div class="nav-section-title">Billing</div>
+                    
+                    <a href="/billing" class="nav-link {% if request.url.path == '/billing' %}active{% endif %}">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="1" y="4" width="22" height="16" rx="2" ry="2"/>
+                            <line x1="1" y1="10" x2="23" y2="10"/>
+                        </svg>
+                        My Billing
+                        {% if pending_invoices is defined and pending_invoices > 0 %}
+                        <span class="nav-badge">{{ pending_invoices }}</span>
+                        {% endif %}
                     </a>
                 </div>
                 
-                {% if current_user is defined and current_user and (current_user.is_admin or current_user.role == 'admin') %}
+                <!-- Admin Section (only show if admin) -->
+                {% if current_user %}
+                {% set is_admin = current_user.is_admin if current_user.is_admin is defined else current_user.get('is_admin', false) %}
+                {% if is_admin %}
                 <div class="nav-section">
                     <div class="nav-section-title">Admin</div>
-                    <a href="/admin" class="nav-link {% if request.path == '/admin' %}active{% endif %}">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="12" cy="12" r="3"/>
-                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-                        </svg>
-                        Admin Panel
-                    </a>
-                    <a href="/users" class="nav-link {% if '/users' in request.path %}active{% endif %}">
+                    
+                    <a href="/admin/users" class="nav-link {% if request.url.path == '/admin/users' %}active{% endif %}">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
                             <circle cx="9" cy="7" r="4"/>
@@ -1239,151 +634,82 @@
                         </svg>
                         Users
                     </a>
+                    
+                    <a href="/admin/billing" class="nav-link {% if request.url.path == '/admin/billing' %}active{% endif %}">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="12" y1="1" x2="12" y2="23"/>
+                            <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                        </svg>
+                        Billing Dashboard
+                    </a>
+                    
+                    <a href="/admin/claims" class="nav-link {% if request.url.path == '/admin/claims' %}active{% endif %}">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+                            <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
+                            <path d="M9 14l2 2 4-4"/>
+                        </svg>
+                        Claims Management
+                    </a>
+                  
                 </div>
+                {% endif %}
                 {% endif %}
             </nav>
             
+            <!-- User Footer -->
             <div class="sidebar-footer">
-                {% if current_user is defined and current_user %}
-                <div class="user-menu">
+                {% if current_user %}
+                <div class="user-info">
                     <div class="user-avatar">
-                        {{ (current_user.full_name or current_user.username or 'U')[0]|upper }}
+                        {% if current_user.email is defined %}
+                        {{ current_user.email[0]|upper }}
+                        {% elif current_user.get %}
+                        {{ current_user.get('email', 'U')[0]|upper }}
+                        {% else %}
+                        U
+                        {% endif %}
                     </div>
-                    <div class="user-info">
-                        <div class="user-name">{{ current_user.full_name or current_user.username }}</div>
-                        <div class="user-role">{% if current_user.is_admin %}Administrator{% else %}User{% endif %}</div>
+                    <div>
+                        <div class="user-name">
+                            {% if current_user.email is defined %}
+                            {{ current_user.email }}
+                            {% elif current_user.get %}
+                            {{ current_user.get('email', 'User') }}
+                            {% else %}
+                            User
+                            {% endif %}
+                        </div>
+                        <div class="user-role">
+                            {% set user_is_admin = current_user.is_admin if current_user.is_admin is defined else false %}
+                            {% if user_is_admin %}
+                            Admin
+                            {% else %}
+                            Member
+                            {% endif %}
+                        </div>
                     </div>
                 </div>
+                <a href="/logout" class="btn btn-ghost" style="width: 100%; margin-top: 8px;">
+                    Logout
+                </a>
                 {% else %}
-                <div class="user-menu">
-                    <div class="user-avatar">U</div>
-                    <div class="user-info">
-                        <div class="user-name">User</div>
-                        <div class="user-role">Logged In</div>
-                    </div>
-                </div>
+                <a href="/login" class="btn btn-primary" style="width: 100%;">
+                    Login
+                </a>
                 {% endif %}
             </div>
         </aside>
         
         <!-- Main Content -->
         <main class="main-content">
-            <header class="topbar">
-                <div class="topbar-left">
-                    <button class="mobile-menu-btn" onclick="toggleSidebar()">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <line x1="3" y1="12" x2="21" y2="12"/>
-                            <line x1="3" y1="6" x2="21" y2="6"/>
-                            <line x1="3" y1="18" x2="21" y2="18"/>
-                        </svg>
-                    </button>
-                </div>
-                
-                <div class="topbar-right">
-                    <!-- V2.0 Notification Bell -->
-                    <div class="notification-bell" onclick="toggleNotifications()">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-                            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-                        </svg>
-                        <span class="notification-badge" id="notificationBadge" data-count="0">0</span>
-                        
-                        <div class="notification-dropdown" id="notificationDropdown">
-                            <div class="notification-header">
-                                <h4>Notifications</h4>
-                                <button class="btn btn-ghost btn-sm" onclick="markAllRead()">Mark all read</button>
-                            </div>
-                            <div class="notification-list" id="notificationList">
-                                <div style="padding: 24px; text-align: center; color: var(--text-muted);">
-                                    No notifications
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <a href="/profile" class="btn btn-ghost btn-sm">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-                            <circle cx="12" cy="7" r="4"/>
-                        </svg>
-                        Profile
-                    </a>
-                    <a href="/logout" class="btn btn-ghost btn-sm">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-                            <polyline points="16,17 21,12 16,7"/>
-                            <line x1="21" y1="12" x2="9" y2="12"/>
-                        </svg>
-                        Logout
-                    </a>
-                </div>
-            </header>
-            
-            <div class="page-content">
-                {% block content %}{% endblock %}
-            </div>
+            {% block content %}{% endblock %}
         </main>
     </div>
     
-    <!-- Toast Container -->
-    <div class="toast-container" id="toastContainer"></div>
+    <!-- Chart.js for analytics -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     
-    <script>
-        // Sidebar toggle for mobile
-        function toggleSidebar() {
-            document.querySelector('.sidebar').classList.toggle('open');
-        }
-        
-        // Notification system
-        function toggleNotifications() {
-            event.stopPropagation();
-            document.getElementById('notificationDropdown').classList.toggle('show');
-        }
-        
-        function markAllRead() {
-            event.stopPropagation();
-            document.getElementById('notificationBadge').textContent = '0';
-            document.getElementById('notificationBadge').dataset.count = '0';
-        }
-        
-        // Close notification dropdown when clicking outside
-        document.addEventListener('click', function(e) {
-            if (!e.target.closest('.notification-bell')) {
-                document.getElementById('notificationDropdown').classList.remove('show');
-            }
-        });
-        
-        // Toast notification helper
-        function showToast(message, type = 'info') {
-            const container = document.getElementById('toastContainer');
-            const toast = document.createElement('div');
-            toast.className = `toast toast-${type}`;
-            toast.innerHTML = `
-                <span>${message}</span>
-                <button onclick="this.parentElement.remove()" style="background:none;border:none;cursor:pointer;margin-left:auto;">✕</button>
-            `;
-            container.appendChild(toast);
-            setTimeout(() => toast.remove(), 5000);
-        }
-        
-        // Deal Analysis helper object for score badges
-        const DealAnalysis = {
-            getScoreClass: function(score) {
-                if (score >= 80) return 'excellent';
-                if (score >= 60) return 'good';
-                if (score >= 40) return 'fair';
-                return 'poor';
-            },
-            formatCurrency: function(val) {
-                if (!val || isNaN(val)) return '$0';
-                return '$' + Math.round(val).toLocaleString();
-            },
-            formatPercent: function(val) {
-                if (!val || isNaN(val)) return '0%';
-                return Math.round(val) + '%';
-            }
-        };
-    </script>
     {% block extra_js %}{% endblock %}
 </body>
 </html>

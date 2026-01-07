@@ -1,36 +1,51 @@
-{# app/templates/cases/_case_overview_tab.html - Updated for V3 Design with Masking #}
+{# app/templates/cases/_case_overview_tab.html - V3 with Data Masking #}
 
-{# Determine if user can view sensitive data - default to FALSE (restricted) #}
-{% if visibility is defined and visibility and visibility.can_view_sensitive %}
-    {% set can_view = true %}
-{% else %}
-    {% set can_view = false %}
+{% set can_view = visibility.can_view_sensitive if visibility else true %}
+{% set is_owner = visibility.is_owner if visibility else false %}
+{% set is_claimed = visibility.is_claimed if visibility else false %}
+
+<!-- V3: Locked Content Banner (if user can't view sensitive data) -->
+{% if not can_view %}
+<div class="locked-banner" style="background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border: 1px solid #f59e0b; border-radius: var(--radius-lg); padding: 16px 20px; margin-bottom: var(--space-lg); display: flex; align-items: center; gap: 12px;">
+    <span style="font-size: 24px;">🔒</span>
+    <div>
+        <strong style="color: #92400e;">Claim Required</strong>
+        <p style="margin: 4px 0 0 0; color: #a16207; font-size: 14px;">
+            Claim this case to view full address, contact information, and download documents.
+        </p>
+    </div>
+    {% if visibility.can_claim %}
+    <button class="btn btn-primary" onclick="claimCase({{ case.id }})" style="margin-left: auto;">
+        🔒 Claim Now
+    </button>
+    {% endif %}
+</div>
 {% endif %}
 
 <!-- Two-column layout for Overview tab -->
 <div class="overview-grid">
     <div class="overview-left">
         <!-- Address Section -->
-        <div class="card">
+        <div class="card {% if not can_view %}locked-section{% endif %}">
             <div class="card-body">
                 <div class="address-header">
                     <div>
                         {% if can_view %}
                             <h3 style="margin: 0 0 4px 0; font-size: 18px;">{{ (case.address_override or case.address)|title }}</h3>
+                            <p style="margin: 0; color: var(--text-secondary); font-size: 14px;">
+                                Parcel ID: {{ case.parcel_id or '—' }} | Filed: {{ case.filing_datetime or '—' }}
+                            </p>
                         {% else %}
-                            <h3 style="margin: 0 0 4px 0; font-size: 18px;">
-                                {% set addr = (case.address_override or case.address or '')|string %}
-                                {% if addr %}
-                                    *** {{ addr.split(',')[1:]|join(',') if ',' in addr else addr.split()[-2:]|join(' ') }}
-                                {% else %}
-                                    🔒 Address hidden
-                                {% endif %}
+                            <!-- V3: Masked Address -->
+                            {% set full_addr = (case.address_override or case.address or '')|string %}
+                            {% set masked_addr = full_addr.split(' ')|first|replace(full_addr.split(' ')|first, '***') ~ ' ' ~ full_addr.split(' ')[1:]|join(' ') if full_addr else '*** Address Hidden' %}
+                            <h3 style="margin: 0 0 4px 0; font-size: 18px; color: var(--text-muted);">
+                                🔒 {{ masked_addr|title }}
                             </h3>
-                            <p style="margin: 4px 0; font-size: 12px; color: var(--warning);">🔒 Claim this case to see full address</p>
+                            <p style="margin: 0; color: var(--text-muted); font-size: 14px;">
+                                Parcel ID: *** | Filed: {{ case.filing_datetime or '—' }}
+                            </p>
                         {% endif %}
-                        <p style="margin: 0; color: var(--text-secondary); font-size: 14px;">
-                            Parcel ID: {% if can_view %}{{ case.parcel_id or '—' }}{% else %}🔒 Hidden{% endif %} | Filed: {{ case.filing_datetime or '—' }}
-                        </p>
                     </div>
                     {% if can_view %}
                     <button class="btn btn-ghost btn-sm" onclick="toggleAddressEdit(true)">Edit</button>
@@ -58,26 +73,27 @@
                 </div>
                 {% endif %}
                 
-                <!-- Street View - Always visible -->
+                <!-- Street View -->
                 {% set sv_addr = case.address_override or case.address %}
                 <div class="streetview-container" style="margin-top: 16px;">
-                    {% if sv_addr and streetview_url and streetview_url(sv_addr) %}
+                    {% if can_view and sv_addr and streetview_url and streetview_url(sv_addr) %}
                         <img src="{{ streetview_url(sv_addr) }}" alt="Street View" class="streetview-img"
                              onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
                         <div class="streetview-placeholder" style="display:none;">
                             <span style="font-size: 32px;">📍</span>
                             <span>Street View unavailable</span>
-                            {% if can_view %}
                             <a href="https://www.google.com/maps?q={{ sv_addr|urlencode }}&layer=c" target="_blank" class="btn btn-secondary btn-sm">Open in Maps</a>
-                            {% endif %}
+                        </div>
+                    {% elif not can_view %}
+                        <div class="streetview-placeholder" style="background: var(--bg-alt); border: 2px dashed var(--border);">
+                            <span style="font-size: 32px;">🔒</span>
+                            <span style="color: var(--text-muted);">Claim case to view Street View</span>
                         </div>
                     {% else %}
                         <div class="streetview-placeholder">
                             <span style="font-size: 32px;">📍</span>
                             <span>Street View unavailable</span>
-                            {% if can_view %}
                             <a href="https://www.google.com/maps?q={{ sv_addr|urlencode }}&layer=c" target="_blank" class="btn btn-secondary btn-sm">Open in Maps</a>
-                            {% endif %}
                         </div>
                     {% endif %}
                 </div>
@@ -100,15 +116,14 @@
                                     {% if can_view %}
                                         {{ name }}
                                     {% else %}
-                                        {{ name.split()[0][0] if name.split() else '?' }}*** {{ name.split()[-1][0] if name.split()|length > 1 else '' }}***
+                                        <!-- V3: Masked name (show initials only) -->
+                                        {% set parts = name.split() %}
+                                        {% for part in parts %}{{ part[0] }}***{% if not loop.last %} {% endif %}{% endfor %}
                                     {% endif %}
                                 </li>
                             {% endif %}
                         {% endfor %}
                     </ul>
-                    {% if not can_view %}
-                    <p style="margin-top: 8px; font-size: 12px; color: var(--warning);">🔒 Claim this case to see full names</p>
-                    {% endif %}
                 {% else %}
                     <p style="color: var(--text-muted); margin: 0;">No defendants recorded.</p>
                 {% endif %}
@@ -116,16 +131,21 @@
         </div>
         
         <!-- Skip Trace Section -->
-        <div class="card">
+        <div class="card {% if not can_view %}locked-section{% endif %}">
             <div class="card-header">
                 <h3 class="card-title">Skip Trace</h3>
+                {% if not can_view %}
+                <span class="badge badge-warning">🔒 Locked</span>
+                {% endif %}
             </div>
             <div class="card-body">
                 {% if not can_view %}
-                    <div style="text-align: center; padding: 24px; background: var(--bg-alt); border-radius: 8px;">
-                        <span style="font-size: 32px; display: block; margin-bottom: 8px;">🔒</span>
-                        <p style="color: var(--text-muted); margin: 0 0 8px 0;">Skip trace data is locked</p>
-                        <p style="font-size: 12px; color: var(--warning);">Claim this case to view contact information</p>
+                    <!-- V3: Locked Skip Trace -->
+                    <div style="text-align: center; padding: 24px; background: var(--bg-alt); border-radius: var(--radius-md); border: 2px dashed var(--border);">
+                        <span style="font-size: 32px;">🔒</span>
+                        <p style="color: var(--text-muted); margin: 8px 0 0 0;">
+                            Claim this case to view contact information
+                        </p>
                     </div>
                 {% elif skip_trace_error %}
                     <div class="alert alert-danger">{{ skip_trace_error }}</div>
@@ -173,8 +193,6 @@
                 <h3 class="card-title">Outstanding Liens</h3>
                 {% if can_view %}
                 <button class="btn btn-primary btn-sm" id="lien-modal-open">+ Add Lien</button>
-                {% else %}
-                <button class="btn btn-secondary btn-sm" disabled title="Claim to add liens" style="opacity: 0.5; cursor: not-allowed;">+ Add Lien</button>
                 {% endif %}
             </div>
             <div class="card-body">
@@ -194,7 +212,7 @@
                         <label class="form-label">ARV (After Repair Value)</label>
                         <input type="text" name="arv" id="arv-input" class="form-control"
                                value="{% if arv %}${{ '{:,.0f}'.format(arv) }}{% endif %}" placeholder="Enter ARV"
-                               {% if not can_view %}disabled style="opacity: 0.6;"{% endif %}>
+                               {% if not can_view %}disabled{% endif %}>
                     </div>
                     
                     <div class="form-group">
@@ -202,7 +220,7 @@
                         {% set rc = rehab_condition or 'Good' %}
                         <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                             {% for cond in ['Poor', 'Fair', 'Good', 'Excellent'] %}
-                            <label class="condition-chip {% if rc == cond %}active{% endif %}" {% if not can_view %}style="opacity: 0.6; pointer-events: none;"{% endif %}>
+                            <label class="condition-chip {% if rc == cond %}active{% endif %}">
                                 <input type="radio" name="rehab_condition" value="{{ cond }}" {% if rc == cond %}checked{% endif %} {% if not can_view %}disabled{% endif %}>
                                 <span>{{ cond }}</span>
                             </label>
@@ -215,7 +233,7 @@
                         <input type="text" name="rehab" id="rehab-input" class="form-control"
                                value="{% if rehab and rehab > 0 %}${{ '{:,.0f}'.format(rehab) }}{% endif %}"
                                placeholder="{% if rehab_suggested %}Suggested: ${{ '{:,.0f}'.format(rehab_suggested) }}{% endif %}"
-                               {% if not can_view %}disabled style="opacity: 0.6;"{% endif %}>
+                               {% if not can_view %}disabled{% endif %}>
                     </div>
                     
                     <div class="form-group">
@@ -223,7 +241,7 @@
                         <input type="text" name="closing_costs" class="form-control"
                                value="{% if closing_input and closing_input > 0 %}${{ '{:,.0f}'.format(closing_input) }}{% endif %}"
                                placeholder="{% if arv %}Suggested: ${{ '{:,.0f}'.format(arv * 0.045) }}{% endif %}"
-                               {% if not can_view %}disabled style="opacity: 0.6;"{% endif %}>
+                               {% if not can_view %}disabled{% endif %}>
                     </div>
                     
                     <div style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%); padding: 16px; border-radius: 8px; margin-bottom: 16px; border: 1px solid rgba(102, 126, 234, 0.2);">
@@ -240,7 +258,7 @@
                     {% if can_view %}
                     <button class="btn btn-primary" type="submit" style="width: 100%;">Save Changes</button>
                     {% else %}
-                    <button class="btn btn-secondary" type="button" disabled style="width: 100%; opacity: 0.5; cursor: not-allowed;">Save Changes (Claim to edit)</button>
+                    <button class="btn btn-secondary" type="button" disabled style="width: 100%;">🔒 Claim to Edit</button>
                     {% endif %}
                 </form>
             </div>
@@ -257,10 +275,6 @@
                     <textarea name="content" rows="2" placeholder="Add a note..." class="form-control" style="margin-bottom: 8px;"></textarea>
                     <button class="btn btn-primary btn-sm" type="submit">Add Note</button>
                 </form>
-                {% else %}
-                <div style="margin-bottom: 16px; padding: 12px; background: var(--bg-alt); border-radius: var(--radius-md); text-align: center;">
-                    <span style="color: var(--text-muted);">🔒 Claim this case to add notes</span>
-                </div>
                 {% endif %}
                 <ul style="list-style: none; padding: 0; margin: 0;">
                     {% if notes %}
@@ -272,7 +286,9 @@
                                             {{ n.created_at.strftime("%m/%d/%Y %I:%M %p") if n.created_at.__class__.__name__ in ["datetime", "date"] else n.created_at }}
                                         {% endif %}
                                     </small>
+                                    {% if can_view %}
                                     <a href="/cases/{{ case.id }}/notes/{{ n.id }}/delete" class="btn btn-ghost btn-sm" style="color: var(--danger);">Delete</a>
+                                    {% endif %}
                                 </div>
                                 <div>{{ n.content or n.text or n.body or n }}</div>
                             </li>
@@ -287,3 +303,38 @@
 </div>
 
 {% include "cases/_case_overview_lien_modal.html" %}
+
+<style>
+/* V3: Locked section styling */
+.locked-section {
+    position: relative;
+}
+
+.locked-section::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: repeating-linear-gradient(
+        45deg,
+        transparent,
+        transparent 10px,
+        rgba(0,0,0,0.02) 10px,
+        rgba(0,0,0,0.02) 20px
+    );
+    pointer-events: none;
+    z-index: 1;
+    border-radius: var(--radius-lg);
+}
+
+.locked-banner {
+    animation: pulse-border 2s infinite;
+}
+
+@keyframes pulse-border {
+    0%, 100% { border-color: #f59e0b; }
+    50% { border-color: #fbbf24; }
+}
+</style>

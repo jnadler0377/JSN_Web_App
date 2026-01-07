@@ -62,14 +62,23 @@ def _maybe_accept_disclaimer(page, humanize_max: int) -> None:
         "button:has-text('Accept')",
         "button:has-text('I Accept')",
         "button:has-text('Agree')",
+        "button:has-text('I Agree')",
+        "button:has-text('Continue')",
         "a:has-text('Accept')",
         "a:has-text('I Accept')",
         "a:has-text('Agree')",
+        "a:has-text('I Agree')",
+        "a:has-text('Continue')",
+        "input[type='submit'][value*='Accept']",
+        "input[type='button'][value*='Accept']",
+        ".btn:has-text('Accept')",
+        ".btn:has-text('Agree')",
     ]
     for sel in buttons:
         try:
             btn = page.locator(sel)
             if btn.count() > 0 and btn.first.is_visible():
+                log.info(f"Found disclaimer button with selector: {sel}")
                 btn.first.click()
                 human_delay(min(2, humanize_max))
                 break
@@ -78,9 +87,31 @@ def _maybe_accept_disclaimer(page, humanize_max: int) -> None:
 
 
 def _open_case_tab(page, humanize_max: int) -> None:
-    tab = page.locator("a[href='#case'], a:has-text('Case')").first
-    tab.click()
-    human_delay(min(2, humanize_max))
+    # Try multiple selectors for the Case tab
+    tab_selectors = [
+        "a[href='#case']",
+        "a:has-text('Case')",
+        "li a:has-text('Case')",
+        ".nav-tabs a:has-text('Case')",
+        ".nav a:has-text('Case')",
+        "#caseTabs a:has-text('Case')",
+        "button:has-text('Case')",
+    ]
+    
+    for sel in tab_selectors:
+        try:
+            tab = page.locator(sel).first
+            if tab.count() > 0 and tab.is_visible():
+                log.info(f"Found Case tab with selector: {sel}")
+                tab.click()
+                human_delay(min(2, humanize_max))
+                return
+        except Exception as e:
+            log.debug(f"Tab selector {sel} failed: {e}")
+            continue
+    
+    # If no tab found, the page might already be on Case search
+    log.warning("Case tab not found - page may already be on Case search")
 
 
 def _set_case_type(page, humanize_max: int) -> None:
@@ -88,13 +119,45 @@ def _set_case_type(page, humanize_max: int) -> None:
     if container.count() == 0:
         container = page.locator("body")
 
-    btn = container.locator("button.multiselect.dropdown-toggle").first
+    # Try multiple selectors for the case type dropdown
+    dropdown_btn_selectors = [
+        "button.multiselect.dropdown-toggle",
+        "button.multiselect",
+        ".multiselect.dropdown-toggle",
+        "select#caseTypeSelect",
+        "#caseType",
+        "button:has-text('Select Case Type')",
+        "button:has-text('Case Type')",
+    ]
+    
+    btn = None
+    for sel in dropdown_btn_selectors:
+        try:
+            btn_loc = container.locator(sel).first
+            if btn_loc.count() > 0 and btn_loc.is_visible():
+                btn = btn_loc
+                log.info(f"Found case type dropdown with selector: {sel}")
+                break
+        except Exception:
+            continue
+    
+    if btn is None:
+        log.warning("Case type dropdown not found - may not be required")
+        return
+        
     btn.click()
     human_delay(min(1, humanize_max))
 
     dropdown = container.locator("ul.multiselect-container").first
     if dropdown.count() == 0:
         dropdown = page.locator("ul.multiselect-container").first
+    
+    if dropdown.count() == 0:
+        dropdown = page.locator(".dropdown-menu:visible").first
+
+    if dropdown.count() == 0:
+        log.warning("Dropdown menu not found after clicking button")
+        return
 
     try:
         select_all = dropdown.locator("input[type='checkbox'][value='multiselect-all']")
@@ -112,39 +175,183 @@ def _set_case_type(page, humanize_max: int) -> None:
     except Exception:
         pass
 
-    target = dropdown.locator("input[type='checkbox'][value='Real Property/Mortgage Foreclosure']")
-    if target.count() > 0:
-        if not target.first.is_checked():
-            target.first.click()
-    else:
-        label = dropdown.locator("label:has-text('Real Property/Mortgage Foreclosure')")
-        if label.count() > 0:
-            label.first.click()
-
-    human_delay(min(1, humanize_max))
+    # Try to find and select "Real Property/Mortgage Foreclosure"
+    selected = False
+    foreclosure_selectors = [
+        "input[type='checkbox'][value='Real Property/Mortgage Foreclosure']",
+        "input[type='checkbox'][value*='Foreclosure']",
+        "input[type='checkbox'][value*='foreclosure']",
+    ]
+    
+    for sel in foreclosure_selectors:
+        target = dropdown.locator(sel)
+        if target.count() > 0:
+            if not target.first.is_checked():
+                target.first.click()
+            selected = True
+            human_delay(min(1, humanize_max))
+            break
+    
+    # Try by label text if not found by checkbox value
+    if not selected:
+        label_texts = [
+            "Real Property/Mortgage Foreclosure",
+            "Mortgage Foreclosure",
+            "Foreclosure",
+        ]
+        
+        for text in label_texts:
+            label = dropdown.locator(f"label:has-text('{text}')")
+            if label.count() > 0:
+                label.first.click()
+                selected = True
+                human_delay(min(1, humanize_max))
+                break
+    
+    if not selected:
+        log.warning("Foreclosure case type option not found in dropdown")
+    
+    # IMPORTANT: Close the dropdown by clicking the button again or pressing Escape
+    try:
+        # Try clicking the dropdown button again to close it
+        btn.click()
+        human_delay(min(0.5, humanize_max))
+    except Exception:
+        pass
+    
+    try:
+        # Also press Escape to make sure it's closed
+        page.keyboard.press("Escape")
+        human_delay(min(0.5, humanize_max))
+    except Exception:
+        pass
+    
+    # Click somewhere neutral to ensure dropdown is closed
+    try:
+        page.locator("#case").click(position={"x": 10, "y": 10})
+        human_delay(min(0.5, humanize_max))
+    except Exception:
+        pass
+    
+    log.info("Case type selected and dropdown closed")
 
 
 def _submit_case_search(page, humanize_max: int) -> None:
+    # First, close any open dropdowns by clicking elsewhere
+    try:
+        page.locator("body").click(position={"x": 10, "y": 10})
+        human_delay(0.5)
+    except Exception:
+        pass
+    
     container = page.locator("#case")
     if container.count() == 0:
         container = page.locator("body")
 
+    # Extended list of possible selectors for the search/submit button
+    # Be more specific to avoid clicking dropdown items
     selectors = [
         "#caseSearch",
+        "#caseSearchBtn",
+        "#searchButton",
+        "#btnSearch",
+        "#submit",
         "button#caseSearch",
-        "button:has-text('Submit')",
-        "button:has-text('Search')",
+        "button#caseSearchBtn",
+        "button#searchButton",
+        "button#btnSearch",
+        # Look for buttons with search-related classes
+        "button.btn-primary[type='submit']",
+        "button.btn-search",
+        "button.search-btn",
+        # Text-based but exclude dropdown items
+        "#case > button:has-text('Search')",
+        "#case > div > button:has-text('Search')",
+        "#case button.btn-primary:has-text('Search')",
+        "#case button.btn:has-text('Search'):not(.multiselect)",
+        "form button:has-text('Search')",
+        "form button:has-text('Submit')",
+        "form input[type='submit']",
+        # More generic submit buttons
+        "input[type='submit'][value='Search']",
+        "input[type='submit'][value='Submit']",
         "input[type='submit']",
+        "input[type='button'][value='Search']",
+        "input[type='button'][value='Submit']",
     ]
+    
     for sel in selectors:
-        btn = container.locator(sel)
-        if btn.count() > 0:
-            try:
+        try:
+            btn = container.locator(sel)
+            if btn.count() > 0:
+                # Verify this isn't a dropdown item
+                btn_text = ""
+                try:
+                    btn_text = btn.first.inner_text().strip().lower()
+                except:
+                    pass
+                
+                # Skip if it looks like a dropdown option
+                if "foreclosure" in btn_text or "property" in btn_text:
+                    log.debug(f"Skipping dropdown item: {btn_text}")
+                    continue
+                    
+                log.info(f"Found search button with selector: {sel}")
+                btn.first.scroll_into_view_if_needed()
                 btn.first.click()
                 human_delay(min(2, humanize_max))
                 return
-            except Exception:
+        except Exception as e:
+            log.debug(f"Selector {sel} failed: {e}")
+            continue
+
+    # Fallback: look for any button that looks like a search/submit button
+    try:
+        # Close dropdown again just in case
+        page.keyboard.press("Escape")
+        human_delay(0.5)
+        
+        all_buttons = page.locator("#case button:visible, #case input[type='submit']:visible")
+        log.info(f"Fallback: Found {all_buttons.count()} visible buttons in #case")
+        
+        for i in range(all_buttons.count()):
+            btn = all_buttons.nth(i)
+            try:
+                btn_text = btn.inner_text().strip() if btn.evaluate("el => el.tagName") == "BUTTON" else (btn.get_attribute("value") or "")
+                btn_class = btn.get_attribute("class") or ""
+                log.info(f"  Button {i}: text='{btn_text}', class='{btn_class}'")
+                
+                # Skip dropdown-related buttons
+                if "multiselect" in btn_class.lower() or "dropdown" in btn_class.lower():
+                    continue
+                if "foreclosure" in btn_text.lower() or "property" in btn_text.lower():
+                    continue
+                    
+                # This might be the search button
+                if "search" in btn_text.lower() or "submit" in btn_text.lower() or btn_text == "":
+                    log.info(f"  -> Clicking button {i}")
+                    btn.click()
+                    human_delay(min(2, humanize_max))
+                    return
+            except Exception as e:
+                log.debug(f"  Button {i} inspection failed: {e}")
                 continue
+    except Exception as e:
+        log.error(f"Fallback button search failed: {e}")
+
+    # Save debug screenshot
+    try:
+        debug_path = os.path.join(DEBUG_DIR, "submit_button_not_found.png")
+        page.screenshot(path=debug_path)
+        log.info(f"Debug screenshot saved to: {debug_path}")
+        
+        # Also save the HTML for inspection
+        html_path = os.path.join(DEBUG_DIR, "submit_button_not_found.html")
+        with open(html_path, "w", encoding="utf-8") as f:
+            f.write(page.content())
+        log.info(f"Debug HTML saved to: {html_path}")
+    except Exception:
+        pass
 
     raise RuntimeError("Could not locate submit/search button on Case tab.")
 
@@ -358,6 +565,7 @@ def parse_args():
     # Unified mode flags (match Pasco)
     p.add_argument("--headed", action="store_true", help="Run with visible browser (requires X/desktop)")
     p.add_argument("--headless", action="store_true", help="Force headless mode (default on servers)")
+    p.add_argument("--debug", action="store_true", help="Enable debug mode: headed browser, screenshots, slower delays")
 
     p.add_argument("--trace", action="store_true", help="Record Playwright trace")
     p.add_argument("--screenshot", action="store_true", help="Save a screenshot on failures")
@@ -366,7 +574,17 @@ def parse_args():
     p.add_argument("--since-days", type=int, default=0, help="Only include filings within the last N days")
     p.add_argument("--max-records", type=int, default=0, help="Stop after N records (0 = no limit)")
     p.add_argument("--out", type=str, default="", help="Write harvested CSV to this exact path")
-    return p.parse_args()
+    
+    args = p.parse_args()
+    
+    # Debug mode enables headed + screenshots + save-html
+    if args.debug:
+        args.headed = True
+        args.screenshot = True
+        args.save_html = True
+        log.info("Debug mode enabled: headed browser, screenshots on failure")
+    
+    return args
 
 
 def _dump_artifacts(page, context, *, screenshot: bool, save_html: bool, trace: bool) -> None:
@@ -416,8 +634,30 @@ def main():
             if since_days > 0:
                 date_to = datetime.now()
                 date_from = date_to - timedelta(days=since_days)
-                _set_date_input(page, "#DateFrom", _fmt_mdy(date_from))
-                _set_date_input(page, "#DateTo", _fmt_mdy(date_to))
+                
+                # Try multiple date input selectors
+                date_from_selectors = ["#DateFrom", "#dateFrom", "#fromDate", "input[name='DateFrom']", "input[name='dateFrom']"]
+                date_to_selectors = ["#DateTo", "#dateTo", "#toDate", "input[name='DateTo']", "input[name='dateTo']"]
+                
+                for sel in date_from_selectors:
+                    try:
+                        loc = page.locator(sel).first
+                        if loc.count() > 0:
+                            _set_date_input(page, sel, _fmt_mdy(date_from))
+                            log.info(f"Set date from using selector: {sel}")
+                            break
+                    except Exception:
+                        continue
+                        
+                for sel in date_to_selectors:
+                    try:
+                        loc = page.locator(sel).first
+                        if loc.count() > 0:
+                            _set_date_input(page, sel, _fmt_mdy(date_to))
+                            log.info(f"Set date to using selector: {sel}")
+                            break
+                    except Exception:
+                        continue
             else:
                 try:
                     page.locator("#DateFrom").fill("")
@@ -428,6 +668,14 @@ def main():
             human_delay(min(2, args.humanize_max))
             _set_case_type(page, args.humanize_max)
             human_delay(min(1, args.humanize_max))
+            
+            # Save debug screenshot before searching
+            try:
+                debug_path = os.path.join(DEBUG_DIR, "before_search.png")
+                page.screenshot(path=debug_path)
+                log.info(f"Pre-search screenshot saved to: {debug_path}")
+            except Exception:
+                pass
 
             _submit_case_search(page, args.humanize_max)
             page.wait_for_load_state("networkidle")
@@ -463,5 +711,8 @@ if __name__ == "__main__":
         main()
     except Exception as exc:
         log.error("EXIT WITH ERROR: %s", exc)
+        if "submit" in str(exc).lower() or "button" in str(exc).lower():
+            log.error("TIP: The website may have changed. Check debug files in: %s", DEBUG_DIR)
+            log.error("TIP: Run with --debug flag to see the browser: python pinellas_foreclosure_scraper.py --debug")
         sys.exit(1)
     log.info("DONE")

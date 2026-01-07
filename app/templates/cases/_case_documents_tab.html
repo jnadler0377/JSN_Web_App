@@ -1,5 +1,95 @@
 {# templates/cases/_case_documents_tab.html - Document Management System #}
 
+{# Determine if user can view documents - default to FALSE (restricted) #}
+{% if visibility is defined and visibility and visibility.can_view_documents %}
+    {% set can_view = true %}
+{% else %}
+    {% set can_view = false %}
+{% endif %}
+
+{% if not can_view %}
+<!-- Locked Documents Banner -->
+<div style="background: linear-gradient(135deg, var(--warning-light), var(--bg-alt)); padding: 16px 24px; border-radius: var(--radius-md); margin-bottom: 24px; display: flex; align-items: center; gap: 16px;">
+    <span style="font-size: 32px;">🔒</span>
+    <div style="flex: 1;">
+        <h4 style="margin: 0 0 4px 0;">Documents Preview Only</h4>
+        <p style="margin: 0; color: var(--text-muted); font-size: 14px;">Claim this case to download and view document contents.</p>
+    </div>
+    {% if visibility and visibility.can_claim %}
+    <button class="btn btn-primary" onclick="claimCase({{ case.id }})">🔒 Claim to Unlock</button>
+    {% endif %}
+</div>
+
+<!-- Grayed out document list (preview only) -->
+<div class="documents-section" style="opacity: 0.6; pointer-events: none; filter: grayscale(50%);">
+    <!-- Document Stats (placeholder) -->
+    <div class="doc-stats-bar" id="doc-stats">
+        <div class="doc-stat">
+            <span class="doc-stat-value">?</span>
+            <span class="doc-stat-label">Documents</span>
+        </div>
+        <div class="doc-stat">
+            <span class="doc-stat-value">—</span>
+            <span class="doc-stat-label">Total Size</span>
+        </div>
+        <div class="doc-stat">
+            <span class="doc-stat-value">—</span>
+            <span class="doc-stat-label">Categories</span>
+        </div>
+    </div>
+    
+    <!-- Placeholder document categories -->
+    <div class="doc-categories">
+        <div class="doc-category">
+            <div class="doc-category-header">
+                <span class="doc-category-icon">📜</span>
+                <span class="doc-category-name">Court Documents</span>
+                <span class="doc-category-count">🔒</span>
+            </div>
+        </div>
+        <div class="doc-category">
+            <div class="doc-category-header">
+                <span class="doc-category-icon">🏠</span>
+                <span class="doc-category-name">Property Documents</span>
+                <span class="doc-category-count">🔒</span>
+            </div>
+        </div>
+        <div class="doc-category">
+            <div class="doc-category-header">
+                <span class="doc-category-icon">💰</span>
+                <span class="doc-category-name">Financial Documents</span>
+                <span class="doc-category-count">🔒</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.doc-category {
+    background: var(--bg-alt);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    margin-bottom: 12px;
+}
+.doc-category-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.doc-category-icon {
+    font-size: 24px;
+}
+.doc-category-name {
+    flex: 1;
+    font-weight: 500;
+}
+.doc-category-count {
+    color: var(--text-muted);
+}
+</style>
+
+{% else %}
+
 <div class="documents-section">
     <!-- Document Stats -->
     <div class="doc-stats-bar" id="doc-stats">
@@ -72,6 +162,8 @@
         </div>
     </div>
 </div>
+
+{% endif %}{# end can_view check #}
 
 <style>
 .documents-section {

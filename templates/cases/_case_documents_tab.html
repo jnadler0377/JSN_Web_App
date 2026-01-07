@@ -1,0 +1,444 @@
+{# app/templates/cases/_case_documents_tab.html - V3 with Document Locking #}
+
+{% set can_view = visibility.can_view_sensitive if visibility else true %}
+{% set can_download = visibility.can_view_documents if visibility else true %}
+{% set is_owner = visibility.is_owner if visibility else false %}
+
+<!-- V3: Document Access Notice -->
+{% if not can_download %}
+<div class="locked-banner" style="background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border: 1px solid #f59e0b; border-radius: var(--radius-lg); padding: 16px 20px; margin-bottom: var(--space-lg); display: flex; align-items: center; gap: 12px;">
+    <span style="font-size: 24px;">🔒</span>
+    <div>
+        <strong style="color: #92400e;">Documents Locked</strong>
+        <p style="margin: 4px 0 0 0; color: #a16207; font-size: 14px;">
+            Claim this case to download documents. You can see document names but cannot access the files.
+        </p>
+    </div>
+    {% if visibility.can_claim %}
+    <button class="btn btn-primary" onclick="claimCase({{ case.id }})" style="margin-left: auto;">
+        🔒 Claim to Unlock
+    </button>
+    {% endif %}
+</div>
+{% endif %}
+
+<div class="documents-container">
+    <!-- Upload Section (only if user can upload) -->
+    {% if can_download %}
+    <div class="card" style="margin-bottom: var(--space-lg);">
+        <div class="card-header">
+            <h3 class="card-title">Upload Documents</h3>
+        </div>
+        <div class="card-body">
+            <form id="doc-upload-form" enctype="multipart/form-data">
+                <div style="display: grid; grid-template-columns: 1fr auto auto; gap: var(--space-md); align-items: end;">
+                    <div class="form-group" style="margin: 0;">
+                        <label class="form-label">Select File</label>
+                        <input type="file" name="file" id="doc-file" class="form-control" required>
+                    </div>
+                    <div class="form-group" style="margin: 0;">
+                        <label class="form-label">Document Type</label>
+                        <select name="document_type" id="doc-type" class="form-control" style="min-width: 180px;">
+                            <option value="verified_complaint">Verified Complaint</option>
+                            <option value="mortgage">Mortgage</option>
+                            <option value="current_deed">Current Deed</option>
+                            <option value="previous_deed">Previous Deed</option>
+                            <option value="value_calc">Value Calculation</option>
+                            <option value="appraisal">Appraisal</option>
+                            <option value="title_report">Title Report</option>
+                            <option value="other">Other</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-primary" id="upload-btn">
+                        📤 Upload
+                    </button>
+                </div>
+                <div id="upload-progress" style="display: none; margin-top: 12px;">
+                    <div style="background: var(--bg-alt); border-radius: var(--radius-full); height: 8px; overflow: hidden;">
+                        <div id="progress-bar" style="background: var(--primary); height: 100%; width: 0%; transition: width 0.3s;"></div>
+                    </div>
+                    <span id="progress-text" style="font-size: 12px; color: var(--text-muted);">Uploading...</span>
+                </div>
+            </form>
+        </div>
+    </div>
+    {% endif %}
+    
+    <!-- Documents Grid -->
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title">Case Documents</h3>
+            <span id="doc-count" class="badge badge-neutral">Loading...</span>
+        </div>
+        <div class="card-body">
+            <div id="documents-list">
+                <div style="text-align: center; padding: 24px; color: var(--text-muted);">
+                    <div class="spinner" style="margin: 0 auto 12px;"></div>
+                    Loading documents...
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Legacy Document Paths (from case fields) -->
+    {% set legacy_docs = [] %}
+    {% if case.verified_complaint_path %}{% set _ = legacy_docs.append(('Verified Complaint', case.verified_complaint_path)) %}{% endif %}
+    {% if case.mortgage_path %}{% set _ = legacy_docs.append(('Mortgage', case.mortgage_path)) %}{% endif %}
+    {% if case.current_deed_path %}{% set _ = legacy_docs.append(('Current Deed', case.current_deed_path)) %}{% endif %}
+    {% if case.previous_deed_path %}{% set _ = legacy_docs.append(('Previous Deed', case.previous_deed_path)) %}{% endif %}
+    {% if case.value_calc_path %}{% set _ = legacy_docs.append(('Value Calculation', case.value_calc_path)) %}{% endif %}
+    {% if case.appraiser_doc1_path %}{% set _ = legacy_docs.append(('Appraiser Doc 1', case.appraiser_doc1_path)) %}{% endif %}
+    {% if case.appraiser_doc2_path %}{% set _ = legacy_docs.append(('Appraiser Doc 2', case.appraiser_doc2_path)) %}{% endif %}
+    
+    {% if legacy_docs %}
+    <div class="card" style="margin-top: var(--space-lg);">
+        <div class="card-header">
+            <h3 class="card-title">Legacy Documents</h3>
+            <span class="badge badge-neutral">{{ legacy_docs|length }}</span>
+        </div>
+        <div class="card-body">
+            <div style="display: grid; gap: 8px;">
+                {% for name, path in legacy_docs %}
+                <div class="doc-item" style="display: flex; justify-content: space-between; align-items: center; padding: 12px; background: var(--bg-alt); border-radius: var(--radius-md);">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <span style="font-size: 20px;">📄</span>
+                        <div>
+                            <div style="font-weight: 500;">{{ name }}</div>
+                            <div style="font-size: 12px; color: var(--text-muted);">{{ path.split('/')|last }}</div>
+                        </div>
+                    </div>
+                    {% if can_download %}
+                    <a href="/uploads/{{ path }}" target="_blank" class="btn btn-secondary btn-sm">
+                        📥 Download
+                    </a>
+                    {% else %}
+                    <button class="btn btn-secondary btn-sm" disabled title="Claim case to download">
+                        🔒 Locked
+                    </button>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+.documents-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: var(--space-md);
+}
+
+.document-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-md);
+    transition: var(--transition);
+}
+
+.document-card:hover {
+    border-color: var(--primary);
+    box-shadow: var(--shadow-md);
+}
+
+.document-card.locked {
+    opacity: 0.7;
+    background: var(--bg-alt);
+}
+
+.document-card.locked:hover {
+    border-color: var(--warning);
+}
+
+.doc-icon {
+    width: 48px;
+    height: 48px;
+    background: var(--bg-alt);
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    margin-bottom: 12px;
+}
+
+.doc-type-badge {
+    display: inline-block;
+    padding: 4px 8px;
+    background: rgba(102, 126, 234, 0.1);
+    color: var(--primary);
+    border-radius: var(--radius-full);
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+}
+
+.doc-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+}
+</style>
+
+<script>
+const CASE_ID = {{ case.id }};
+const CAN_DOWNLOAD = {{ 'true' if can_download else 'false' }};
+
+// Load documents on page load
+document.addEventListener('DOMContentLoaded', loadDocuments);
+
+async function loadDocuments() {
+    const container = document.getElementById('documents-list');
+    const countBadge = document.getElementById('doc-count');
+    
+    try {
+        const response = await fetch(`/api/v2/cases/${CASE_ID}/documents`);
+        
+        if (!response.ok) {
+            throw new Error('Failed to load documents');
+        }
+        
+        const data = await response.json();
+        const documents = data.documents || [];
+        const canDownload = data.can_download !== false;
+        
+        countBadge.textContent = `${documents.length} document${documents.length !== 1 ? 's' : ''}`;
+        
+        if (documents.length === 0) {
+            container.innerHTML = `
+                <div style="text-align: center; padding: 48px; color: var(--text-muted);">
+                    <span style="font-size: 48px; display: block; margin-bottom: 12px;">📁</span>
+                    <p>No documents uploaded yet.</p>
+                    ${canDownload ? '<p style="font-size: 14px;">Use the form above to upload documents.</p>' : ''}
+                </div>
+            `;
+            return;
+        }
+        
+        let html = '<div class="documents-grid">';
+        
+        for (const doc of documents) {
+            const isLocked = doc.locked || !canDownload;
+            const icon = getDocIcon(doc.document_type || doc.mime_type);
+            const typeName = formatDocType(doc.document_type);
+            
+            html += `
+                <div class="document-card ${isLocked ? 'locked' : ''}">
+                    <div class="doc-icon">${icon}</div>
+                    <div style="font-weight: 500; margin-bottom: 4px; word-break: break-word;">
+                        ${escapeHtml(doc.original_filename || doc.filename || 'Document')}
+                    </div>
+                    <div class="doc-type-badge">${typeName}</div>
+                    <div style="font-size: 12px; color: var(--text-muted); margin-top: 8px;">
+                        Uploaded: ${formatDate(doc.uploaded_at || doc.created_at)}
+                    </div>
+                    <div class="doc-actions">
+                        ${isLocked ? `
+                            <button class="btn btn-secondary btn-sm" disabled style="flex: 1;">
+                                🔒 Locked
+                            </button>
+                        ` : `
+                            <a href="/api/v2/documents/${doc.id}/download" class="btn btn-primary btn-sm" style="flex: 1;">
+                                📥 Download
+                            </a>
+                            <button class="btn btn-secondary btn-sm" onclick="runOCR(${doc.id})" title="Extract text with OCR">
+                                🔍
+                            </button>
+                            <button class="btn btn-ghost btn-sm" onclick="deleteDoc(${doc.id})" style="color: var(--danger);" title="Delete">
+                                🗑️
+                            </button>
+                        `}
+                    </div>
+                </div>
+            `;
+        }
+        
+        html += '</div>';
+        container.innerHTML = html;
+        
+    } catch (error) {
+        console.error('Error loading documents:', error);
+        container.innerHTML = `
+            <div style="text-align: center; padding: 24px; color: var(--danger);">
+                <p>Failed to load documents. Please refresh the page.</p>
+            </div>
+        `;
+    }
+}
+
+function getDocIcon(type) {
+    const icons = {
+        'application/pdf': '📑',
+        'pdf': '📑',
+        'verified_complaint': '⚖️',
+        'mortgage': '🏦',
+        'current_deed': '📜',
+        'previous_deed': '📜',
+        'value_calc': '💰',
+        'appraisal': '🏠',
+        'title_report': '📋',
+        'image': '🖼️',
+        'other': '📄',
+    };
+    return icons[type] || icons['other'];
+}
+
+function formatDocType(type) {
+    const names = {
+        'verified_complaint': 'Complaint',
+        'mortgage': 'Mortgage',
+        'current_deed': 'Deed',
+        'previous_deed': 'Prior Deed',
+        'value_calc': 'Valuation',
+        'appraisal': 'Appraisal',
+        'title_report': 'Title',
+        'other': 'Other',
+    };
+    return names[type] || type || 'Document';
+}
+
+function formatDate(dateStr) {
+    if (!dateStr) return 'Unknown';
+    try {
+        const date = new Date(dateStr);
+        return date.toLocaleDateString();
+    } catch {
+        return dateStr;
+    }
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Upload handling
+const uploadForm = document.getElementById('doc-upload-form');
+if (uploadForm) {
+    uploadForm.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        const fileInput = document.getElementById('doc-file');
+        const typeSelect = document.getElementById('doc-type');
+        const uploadBtn = document.getElementById('upload-btn');
+        const progressDiv = document.getElementById('upload-progress');
+        const progressBar = document.getElementById('progress-bar');
+        
+        if (!fileInput.files.length) {
+            alert('Please select a file');
+            return;
+        }
+        
+        const formData = new FormData();
+        formData.append('file', fileInput.files[0]);
+        formData.append('document_type', typeSelect.value);
+        
+        uploadBtn.disabled = true;
+        uploadBtn.textContent = 'Uploading...';
+        progressDiv.style.display = 'block';
+        progressBar.style.width = '0%';
+        
+        try {
+            const response = await fetch(`/api/v2/cases/${CASE_ID}/documents`, {
+                method: 'POST',
+                body: formData,
+            });
+            
+            progressBar.style.width = '100%';
+            
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || 'Upload failed');
+            }
+            
+            const result = await response.json();
+            showToast('Document uploaded successfully!', 'success');
+            
+            // Reset form and reload documents
+            uploadForm.reset();
+            loadDocuments();
+            
+        } catch (error) {
+            showToast(error.message, 'error');
+        } finally {
+            uploadBtn.disabled = false;
+            uploadBtn.textContent = '📤 Upload';
+            progressDiv.style.display = 'none';
+        }
+    });
+}
+
+async function deleteDoc(docId) {
+    if (!confirm('Delete this document?')) return;
+    
+    try {
+        const response = await fetch(`/api/v2/documents/${docId}`, {
+            method: 'DELETE',
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Delete failed');
+        }
+        
+        showToast('Document deleted', 'success');
+        loadDocuments();
+        
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+async function runOCR(docId) {
+    showToast('Running OCR...', 'info');
+    
+    try {
+        const response = await fetch(`/api/v2/documents/${docId}/ocr`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'OCR failed');
+        }
+        
+        const result = await response.json();
+        showToast('OCR completed! Check console for extracted data.', 'success');
+        console.log('OCR Result:', result);
+        
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+function showToast(message, type) {
+    const existing = document.querySelector('.doc-toast');
+    if (existing) existing.remove();
+    
+    const toast = document.createElement('div');
+    toast.className = 'doc-toast';
+    toast.textContent = message;
+    toast.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        padding: 12px 20px;
+        border-radius: 8px;
+        color: white;
+        font-size: 14px;
+        z-index: 10000;
+        animation: slideIn 0.3s ease;
+        background: ${type === 'error' ? '#ef4444' : type === 'info' ? '#3b82f6' : '#10b981'};
+    `;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 4000);
+}
+</script>

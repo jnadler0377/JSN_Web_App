@@ -1,0 +1,311 @@
+{% extends "base.html" %}
+{% block title %}Billing - JSN Holdings{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Billing</h1>
+        <p class="page-subtitle">View your claims, costs, and invoices.</p>
+    </div>
+</div>
+
+<!-- Payment Method Card -->
+<div class="card" style="margin-bottom: var(--space-xl);">
+    <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+        <h3 class="card-title">💳 Payment Method</h3>
+        <a href="/billing/payment-method" class="btn btn-secondary btn-sm">Manage</a>
+    </div>
+    <div class="card-body" id="payment-method-section">
+        <div style="text-align: center; padding: 16px; color: var(--text-muted);">
+            Loading...
+        </div>
+    </div>
+</div>
+
+<!-- Billing Summary Cards -->
+<div class="billing-summary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-md); margin-bottom: var(--space-xl);">
+    <div class="card">
+        <div class="card-body" style="text-align: center;">
+            <div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px;">Active Claims</div>
+            <div id="active-claims" style="font-size: 32px; font-weight: 700; color: var(--primary);">—</div>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-body" style="text-align: center;">
+            <div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px;">Today's Total</div>
+            <div id="total-invested" style="font-size: 32px; font-weight: 700; color: var(--text);">—</div>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-body" style="text-align: center;">
+            <div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px;">Pending Balance</div>
+            <div id="pending-balance" style="font-size: 32px; font-weight: 700; color: var(--warning);">—</div>
+        </div>
+    </div>
+</div>
+
+<!-- Pricing Info -->
+<div class="card" style="margin-bottom: var(--space-xl);">
+    <div class="card-header">
+        <h3 class="card-title">How Pricing Works</h3>
+    </div>
+    <div class="card-body">
+        <div style="display: flex; align-items: center; gap: var(--space-lg); padding: var(--space-md); background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1)); border-radius: var(--radius-lg);">
+            <div style="font-size: 48px;">💰</div>
+            <div>
+                <div style="font-size: 18px; font-weight: 600; margin-bottom: 4px;">Price = Case Value</div>
+                <div style="color: var(--text-secondary);">
+                    Each case is priced based on its value. A case priced at <strong>$52</strong> costs <strong>$52</strong> to claim.
+                    Once claimed, you own exclusive access to that case forever.
+                </div>
+            </div>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-md); margin-top: var(--space-lg);">
+            <div style="text-align: center; padding: var(--space-md); background: var(--success-light); border-radius: var(--radius-md);">
+                <div style="font-size: 24px; font-weight: 700; color: var(--success);">$80-$100</div>
+                <div style="font-size: 12px; color: var(--text-muted);">Premium Cases</div>
+            </div>
+            <div style="text-align: center; padding: var(--space-md); background: var(--info-light); border-radius: var(--radius-md);">
+                <div style="font-size: 24px; font-weight: 700; color: var(--info);">$60-$79</div>
+                <div style="font-size: 12px; color: var(--text-muted);">High Value</div>
+            </div>
+            <div style="text-align: center; padding: var(--space-md); background: var(--warning-light); border-radius: var(--radius-md);">
+                <div style="font-size: 24px; font-weight: 700; color: #b45309;">$40-$59</div>
+                <div style="font-size: 12px; color: var(--text-muted);">Standard</div>
+            </div>
+            <div style="text-align: center; padding: var(--space-md); background: var(--danger-light); border-radius: var(--radius-md);">
+                <div style="font-size: 24px; font-weight: 700; color: var(--danger);">$1-$39</div>
+                <div style="font-size: 12px; color: var(--text-muted);">Low Quality</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Active Claims -->
+<div class="card" style="margin-bottom: var(--space-xl);">
+    <div class="card-header">
+        <h3 class="card-title">Your Claims</h3>
+    </div>
+    <div class="card-body">
+        <div id="claims-list">
+            <div style="text-align: center; padding: 24px; color: var(--text-muted);">
+                Loading claims...
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Invoices -->
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Invoices</h3>
+    </div>
+    <div class="card-body">
+        <div id="invoices-list">
+            <div style="text-align: center; padding: 24px; color: var(--text-muted);">
+                Loading invoices...
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    loadPaymentMethod();
+    loadBillingSummary();
+    loadInvoices();
+});
+
+async function loadPaymentMethod() {
+    try {
+        const response = await fetch('/api/v3/payment/status');
+        if (!response.ok) throw new Error('Failed to load');
+        
+        const data = await response.json();
+        const container = document.getElementById('payment-method-section');
+        
+        if (data.payment_method) {
+            container.innerHTML = `
+                <div style="display: flex; align-items: center; gap: 16px;">
+                    <div style="font-size: 32px;">💳</div>
+                    <div style="flex: 1;">
+                        <div style="font-weight: 600;">${data.payment_method.display}</div>
+                        <div style="font-size: 14px; color: var(--text-muted);">
+                            Expires ${data.payment_method.exp_month}/${data.payment_method.exp_year}
+                        </div>
+                    </div>
+                    <span class="badge badge-success">✓ Active</span>
+                </div>
+            `;
+        } else {
+            container.innerHTML = `
+                <div style="display: flex; align-items: center; justify-content: space-between;">
+                    <div style="display: flex; align-items: center; gap: 16px;">
+                        <div style="font-size: 32px;">⚠️</div>
+                        <div>
+                            <div style="font-weight: 600; color: #b45309;">No Payment Method</div>
+                            <div style="font-size: 14px; color: var(--text-muted);">
+                                Add a payment method to claim cases
+                            </div>
+                        </div>
+                    </div>
+                    <a href="/billing/payment-method" class="btn btn-primary">Add Payment Method</a>
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('Error loading payment method:', error);
+    }
+}
+
+async function loadBillingSummary() {
+    try {
+        const response = await fetch('/api/v3/billing/summary');
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Billing summary error:', response.status, errorText);
+            throw new Error(`Failed to load summary: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        console.log('Billing summary data:', data);
+        
+        document.getElementById('active-claims').textContent = data.active_claims || 0;
+        document.getElementById('total-invested').textContent = data.todays_total_display || '$0.00';
+        document.getElementById('pending-balance').textContent = data.pending_balance_display || '$0.00';
+        
+        // Render claims breakdown
+        const claimsList = document.getElementById('claims-list');
+        if (data.claims_breakdown && data.claims_breakdown.length > 0) {
+            let html = '<table class="table"><thead><tr><th>Property</th><th>Price</th><th>Claimed</th></tr></thead><tbody>';
+            
+            for (const claim of data.claims_breakdown) {
+                const price = claim.score || claim.price || 0;
+                const address = claim.address || 'No address';
+                html += `
+                    <tr>
+                        <td><a href="/cases/${claim.case_id}" class="text-primary">${address}</a></td>
+                        <td><span class="badge ${getPriceClass(price)}">$${price}</span></td>
+                        <td>${formatDate(claim.claimed_at)}</td>
+                    </tr>
+                `;
+            }
+            
+            html += '</tbody></table>';
+            claimsList.innerHTML = html;
+        } else {
+            claimsList.innerHTML = `
+                <div style="text-align: center; padding: 48px; color: var(--text-muted);">
+                    <span style="font-size: 48px; display: block; margin-bottom: 12px;">📋</span>
+                    <p>No claims yet.</p>
+                    <a href="/cases" class="btn btn-primary">Browse Cases</a>
+                </div>
+            `;
+        }
+        
+    } catch (error) {
+        console.error('Error loading summary:', error);
+        document.getElementById('claims-list').innerHTML = `
+            <div style="text-align: center; padding: 24px; color: var(--danger);">
+                <p>Failed to load claims: ${error.message}</p>
+                <button class="btn btn-secondary" onclick="loadBillingSummary()">Retry</button>
+            </div>
+        `;
+    }
+}
+
+async function loadInvoices() {
+    try {
+        const response = await fetch('/api/v3/billing/invoices');
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Invoices error:', response.status, errorText);
+            throw new Error(`Failed to load invoices: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        console.log('Invoices data:', data);
+        const invoicesList = document.getElementById('invoices-list');
+        
+        if (data.invoices && data.invoices.length > 0) {
+            let html = '<table class="table"><thead><tr><th>Invoice #</th><th>Date</th><th>Amount</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
+            
+            for (const inv of data.invoices) {
+                const statusClass = {
+                    'paid': 'badge-success',
+                    'pending': 'badge-warning',
+                    'failed': 'badge-danger',
+                }[inv.status] || 'badge-neutral';
+                
+                html += `
+                    <tr>
+                        <td><strong>${inv.invoice_number}</strong></td>
+                        <td>${formatDate(inv.invoice_date)}</td>
+                        <td>${inv.total_display}</td>
+                        <td><span class="badge ${statusClass}">${inv.status}</span></td>
+                        <td>
+                            <button class="btn btn-secondary btn-sm" onclick="viewInvoice(${inv.id})">View</button>
+                            ${inv.stripe_hosted_url ? `<a href="${inv.stripe_hosted_url}" target="_blank" class="btn btn-primary btn-sm">Pay</a>` : ''}
+                        </td>
+                    </tr>
+                `;
+            }
+            
+            html += '</tbody></table>';
+            invoicesList.innerHTML = html;
+        } else {
+            invoicesList.innerHTML = `
+                <div style="text-align: center; padding: 48px; color: var(--text-muted);">
+                    <span style="font-size: 48px; display: block; margin-bottom: 12px;">📄</span>
+                    <p>No invoices yet.</p>
+                </div>
+            `;
+        }
+        
+    } catch (error) {
+        console.error('Error loading invoices:', error);
+        document.getElementById('invoices-list').innerHTML = `
+            <div style="text-align: center; padding: 24px; color: var(--danger);">
+                <p>Failed to load invoices: ${error.message}</p>
+                <button class="btn btn-secondary" onclick="loadInvoices()">Retry</button>
+            </div>
+        `;
+    }
+}
+
+function getPriceClass(price) {
+    if (price >= 80) return 'badge-success';
+    if (price >= 60) return 'badge-info';
+    if (price >= 40) return 'badge-warning';
+    return 'badge-danger';
+}
+
+function formatDate(dateStr) {
+    if (!dateStr) return '—';
+    try {
+        const d = new Date(dateStr);
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        const year = d.getFullYear();
+        return `${month}/${day}/${year}`;
+    } catch {
+        return dateStr;
+    }
+}
+
+function viewInvoice(invoiceId) {
+    window.location.href = `/billing/invoice/${invoiceId}`;
+}
+</script>
+
+<style>
+.badge-success { background: var(--success-light); color: var(--success); }
+.badge-warning { background: var(--warning-light); color: #b45309; }
+.badge-danger { background: var(--danger-light); color: var(--danger); }
+.badge-info { background: var(--info-light); color: var(--info); }
+.badge-neutral { background: var(--bg-alt); color: var(--text-muted); }
+</style>
+{% endblock %}

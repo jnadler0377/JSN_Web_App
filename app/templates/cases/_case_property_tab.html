@@ -1,6 +1,24 @@
 {# app/templates/cases/_case_property_tab.html - V3 Design #}
 
-{% if property_data %}
+{# Determine if user can view sensitive data - default to FALSE (restricted) #}
+{% if visibility is defined and visibility and visibility.can_view_sensitive %}
+    {% set can_view = true %}
+{% else %}
+    {% set can_view = false %}
+{% endif %}
+
+{% if not can_view %}
+<!-- Locked Property Data for non-owners -->
+<div style="text-align: center; padding: 48px; background: var(--bg-alt); border-radius: var(--radius-lg);">
+    <span style="font-size: 48px; display: block; margin-bottom: 16px;">🔒</span>
+    <h3 style="margin: 0 0 8px 0;">Property Data Locked</h3>
+    <p style="color: var(--text-muted); margin: 0 0 16px 0;">Claim this case to view full property details including owner information and mailing address.</p>
+    {% if visibility and visibility.can_claim %}
+    <button class="btn btn-primary" onclick="claimCase({{ case.id }})">🔒 Claim to Unlock</button>
+    {% endif %}
+</div>
+
+{% elif property_data %}
 
 <!-- Owner Information -->
 <div class="property-section">
@@ -282,13 +300,16 @@
 </div>
 {% endif %}
 
-<!-- Raw JSON -->
+<!-- Raw JSON (Admin Only) -->
+{% set is_admin = current_user.is_admin if current_user and current_user.is_admin is defined else (current_user.role == 'admin' if current_user and current_user.role is defined else false) %}
+{% if is_admin %}
 <details style="margin-top: 24px;">
     <summary style="cursor: pointer; color: var(--text-muted); font-size: 14px; padding: 8px 0;">
         🔍 View Raw JSON Data
     </summary>
     <pre style="background: var(--bg-alt); padding: 16px; border-radius: var(--radius-md); overflow-x: auto; margin-top: 8px; font-size: 12px; border: 1px solid var(--border);">{{ property_payload | tojson(indent=2) if property_payload else 'No data' }}</pre>
 </details>
+{% endif %}
 
 <script>
 function toggleEditMode(sectionId) {

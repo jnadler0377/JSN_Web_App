@@ -1,9 +1,10 @@
 # app/routes/document_routes.py
 """
-Document Management Routes
+Document Management Routes - V3 with Ownership Checks
 - Upload/download documents
 - OCR processing
 - Document history and versioning
+- V3: Access control based on case ownership
 """
 
 import json
@@ -38,6 +39,44 @@ def init_document_routes(upload_root, doc_manager_available, doc_manager_func, d
     DocumentType = doc_type_enum
 
 
+def _check_document_access(case: Case, user: dict, action: str = "view") -> bool:
+    """
+    V3: Check if user can access documents for a case.
+    
+    Args:
+        case: The case the document belongs to
+        user: Current user dict
+        action: 'view' for listing, 'download' for downloading
+    
+    Returns:
+        True if access allowed, False otherwise
+    """
+    if not user:
+        return False
+    
+    user_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+    is_admin = user.get("is_admin", False) if isinstance(user, dict) else getattr(user, "is_admin", False)
+    role = user.get("role", "subscriber") if isinstance(user, dict) else getattr(user, "role", "subscriber")
+    
+    # Admins can access everything
+    if is_admin:
+        return True
+    
+    # Owner can access their case documents
+    if case.assigned_to is not None and case.assigned_to == user_id:
+        return True
+    
+    # For unclaimed cases, analysts and owners can view/download
+    if case.assigned_to is None and role in ('admin', 'analyst', 'owner'):
+        return True
+    
+    # Subscribers can only view document metadata for unclaimed cases (not download)
+    if action == "view" and case.assigned_to is None:
+        return True
+    
+    return False
+
+
 @router.get("/cases/{case_id}/documents")
 def api_get_case_documents(
     case_id: int,
@@ -57,14 +96,30 @@ def api_get_case_documents(
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
     
+    # V3: Check access
+    can_access = _check_document_access(case, user, "view")
+    can_download = _check_document_access(case, user, "download")
+    
     doc_manager = get_document_manager(db, str(UPLOAD_ROOT))
     documents = doc_manager.get_documents_for_case(case_id)
     stats = doc_manager.get_document_stats(case_id)
+    
+    # V3: If user can't download, mask file paths and add lock indicator
+    if not can_download:
+        for doc in documents:
+            doc["file_path"] = "[locked]"
+            doc["download_url"] = None
+            doc["locked"] = True
+            doc["lock_reason"] = "Claim this case to download documents"
+    else:
+        for doc in documents:
+            doc["locked"] = False
     
     return {
         "case_id": case_id,
         "documents": documents,
         "stats": stats,
+        "can_download": can_download,
         "document_types": [
             {"value": dt.value, "label": DocumentType.display_name(dt)}
             for dt in DocumentType
@@ -94,6 +149,22 @@ async def api_upload_document(
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
     
+    # V3: Check if user can upload (must be owner or admin, or case is unclaimed and user is analyst+)
+    user_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+    is_admin = user.get("is_admin", False) if isinstance(user, dict) else getattr(user, "is_admin", False)
+    role = user.get("role", "subscriber") if isinstance(user, dict) else getattr(user, "role", "subscriber")
+    
+    can_upload = False
+    if is_admin:
+        can_upload = True
+    elif case.assigned_to == user_id:
+        can_upload = True
+    elif case.assigned_to is None and role in ('admin', 'analyst', 'owner'):
+        can_upload = True
+    
+    if not can_upload:
+        raise HTTPException(status_code=403, detail="You must claim this case to upload documents")
+    
     # Validate document type
     try:
         doc_type = DocumentType(document_type)
@@ -110,7 +181,6 @@ async def api_upload_document(
         raise HTTPException(status_code=400, detail="File too large (max 50MB)")
     
     doc_manager = get_document_manager(db, str(UPLOAD_ROOT))
-    user_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
     
     result = doc_manager.upload_document(
         case_id=case_id,
@@ -148,6 +218,17 @@ def api_get_document(
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
     
+    # V3: Check access to the case this document belongs to
+    case = db.query(Case).filter(Case.id == document.get("case_id")).first()
+    if case:
+        can_download = _check_document_access(case, user, "download")
+        if not can_download:
+            document["file_path"] = "[locked]"
+            document["locked"] = True
+            document["lock_reason"] = "Claim this case to access document details"
+        else:
+            document["locked"] = False
+    
     return document
 
 
@@ -157,7 +238,7 @@ def api_download_document(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    """Download document file"""
+    """Download document file - V3: Requires case ownership"""
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -170,6 +251,16 @@ def api_download_document(
     
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
+    
+    # V3: Check case ownership before allowing download
+    case = db.query(Case).filter(Case.id == document.get("case_id")).first()
+    if case:
+        if not _check_document_access(case, user, "download"):
+            raise HTTPException(
+                status_code=403, 
+                detail="You must claim this case to download documents. "
+                       "Claim the case from the case detail page to get access."
+            )
     
     file_path = Path(UPLOAD_ROOT) / document["file_path"]
     
@@ -189,7 +280,7 @@ def api_delete_document(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    """Soft delete a document"""
+    """Soft delete a document - V3: Requires case ownership"""
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -202,6 +293,18 @@ def api_delete_document(
     
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
+    
+    # V3: Check case ownership before allowing delete
+    case = db.query(Case).filter(Case.id == document.get("case_id")).first()
+    if case:
+        user_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+        is_admin = user.get("is_admin", False) if isinstance(user, dict) else getattr(user, "is_admin", False)
+        
+        if not is_admin and case.assigned_to != user_id:
+            raise HTTPException(
+                status_code=403, 
+                detail="You must own this case to delete documents"
+            )
     
     success = doc_manager.soft_delete_document(doc_id)
     
@@ -234,10 +337,23 @@ def api_get_document_history(
     doc_manager = get_document_manager(db, str(UPLOAD_ROOT))
     history = doc_manager.get_document_history(case_id, document_type)
     
+    # V3: Check access for download URLs
+    case = db.query(Case).filter(Case.id == case_id).first()
+    can_download = False
+    if case:
+        can_download = _check_document_access(case, user, "download")
+    
+    # Mask download info if user can't download
+    if not can_download:
+        for version in history:
+            version["file_path"] = "[locked]"
+            version["locked"] = True
+    
     return {
         "case_id": case_id,
         "document_type": doc_type,
-        "versions": history
+        "versions": history,
+        "can_download": can_download,
     }
 
 
@@ -262,6 +378,15 @@ def api_run_document_ocr(
     
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
+    
+    # V3: Check case ownership for OCR
+    case = db.query(Case).filter(Case.id == document.get("case_id")).first()
+    if case:
+        if not _check_document_access(case, user, "download"):
+            raise HTTPException(
+                status_code=403, 
+                detail="You must claim this case to run OCR on documents"
+            )
     
     # Get file path
     file_path = Path(UPLOAD_ROOT) / document["file_path"]
@@ -325,6 +450,25 @@ def api_save_ocr_mapping(
     case = db.query(Case).filter(Case.id == case_id).first()
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
+    
+    # V3: Check case ownership for saving OCR mappings
+    user_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+    is_admin = user.get("is_admin", False) if isinstance(user, dict) else getattr(user, "is_admin", False)
+    role = user.get("role", "subscriber") if isinstance(user, dict) else getattr(user, "role", "subscriber")
+    
+    can_edit = False
+    if is_admin:
+        can_edit = True
+    elif case.assigned_to == user_id:
+        can_edit = True
+    elif case.assigned_to is None and role in ('admin', 'analyst', 'owner'):
+        can_edit = True
+    
+    if not can_edit:
+        raise HTTPException(
+            status_code=403, 
+            detail="You must claim this case to save OCR mappings"
+        )
     
     mappings = body.get("mappings", [])
     saved_fields = []

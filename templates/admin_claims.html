@@ -1,0 +1,600 @@
+{% extends "base.html" %}
+{% block title %}Admin - Claims Management{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Claims Management</h1>
+        <p class="page-subtitle">View and manage all case claims.</p>
+    </div>
+    <div style="display: flex; gap: 8px;">
+        <button class="btn btn-secondary" onclick="loadClaims()">🔄 Refresh</button>
+        <button class="btn btn-danger" onclick="showBulkReleaseModal()">🔓 Bulk Release</button>
+    </div>
+</div>
+
+<!-- Stats Cards -->
+<div class="stats-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--space-md); margin-bottom: var(--space-xl);">
+    <div class="card">
+        <div class="card-body" style="text-align: center;">
+            <div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px;">Total Claims</div>
+            <div id="stat-total-claims" style="font-size: 28px; font-weight: 700;">0</div>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-body" style="text-align: center;">
+            <div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px;">Active Claims</div>
+            <div id="stat-active-claims" style="font-size: 28px; font-weight: 700; color: var(--success);">0</div>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-body" style="text-align: center;">
+            <div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px;">Released Claims</div>
+            <div id="stat-released-claims" style="font-size: 28px; font-weight: 700; color: var(--text-muted);">0</div>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-body" style="text-align: center;">
+            <div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px;">Total Value</div>
+            <div id="stat-daily-revenue" style="font-size: 28px; font-weight: 700; color: var(--primary);">$0.00</div>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-body" style="text-align: center;">
+            <div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px;">Users with Claims</div>
+            <div id="stat-users-with-claims" style="font-size: 28px; font-weight: 700;">0</div>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-body" style="text-align: center;">
+            <div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px;">Avg Claims/User</div>
+            <div id="stat-avg-claims" style="font-size: 28px; font-weight: 700;">0</div>
+        </div>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="card" style="margin-bottom: var(--space-lg);">
+    <div class="card-body">
+        <div style="display: flex; gap: var(--space-md); flex-wrap: wrap; align-items: center;">
+            <div class="form-group" style="margin: 0;">
+                <label class="form-label">Status</label>
+                <select id="status-filter" class="form-control" onchange="loadClaims()">
+                    <option value="active">Active Only</option>
+                    <option value="all">All Claims</option>
+                    <option value="released">Released Only</option>
+                </select>
+            </div>
+            <div class="form-group" style="margin: 0;">
+                <label class="form-label">User ID</label>
+                <input type="number" id="user-filter" class="form-control" placeholder="All users" style="width: 120px;">
+            </div>
+            <div class="form-group" style="margin: 0;">
+                <label class="form-label">Case ID</label>
+                <input type="number" id="case-filter" class="form-control" placeholder="All cases" style="width: 120px;">
+            </div>
+            <div style="margin-left: auto; display: flex; gap: 8px; align-items: flex-end;">
+                <button class="btn btn-secondary" onclick="loadClaims()">🔍 Search</button>
+                <button class="btn btn-ghost" onclick="exportClaims()">📥 Export</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Claims Table -->
+<div class="card">
+    <div class="card-header">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <input type="checkbox" id="select-all" onchange="toggleSelectAll()">
+            <h3 class="card-title">Claims</h3>
+            <span id="claim-count" class="badge badge-neutral">—</span>
+        </div>
+        <div id="bulk-actions" style="display: none;">
+            <button class="btn btn-danger btn-sm" onclick="bulkRelease()">Release Selected</button>
+            <button class="btn btn-secondary btn-sm" onclick="bulkReassign()">Reassign Selected</button>
+        </div>
+    </div>
+    <div class="card-body" style="padding: 0;">
+        <div id="claims-table" style="overflow-x: auto;">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th style="width: 40px;"></th>
+                        <th>Case</th>
+                        <th>User</th>
+                        <th>Claimed</th>
+                        <th>Score</th>
+                        <th>Price/Day</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="claims-body">
+                    <tr>
+                        <td colspan="8" style="text-align: center; padding: 40px; color: var(--text-muted);">
+                            Loading claims...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Reassign Modal -->
+<div id="reassign-modal" class="modal" style="display: none;">
+    <div class="modal-backdrop" onclick="closeReassignModal()"></div>
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Reassign Case</h3>
+            <button class="btn btn-ghost" onclick="closeReassignModal()">✕</button>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="reassign-case-id">
+            <div class="form-group">
+                <label class="form-label">Case</label>
+                <div id="reassign-case-info" style="padding: 8px; background: var(--bg-alt); border-radius: var(--radius-md);"></div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">New User ID</label>
+                <input type="number" id="reassign-user-id" class="form-control" placeholder="Enter user ID">
+                <small class="form-text">Leave empty to release without reassigning.</small>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="closeReassignModal()">Cancel</button>
+            <button class="btn btn-primary" onclick="submitReassign()">Reassign</button>
+        </div>
+    </div>
+</div>
+
+<!-- Bulk Release Modal -->
+<div id="bulk-release-modal" class="modal" style="display: none;">
+    <div class="modal-backdrop" onclick="closeBulkReleaseModal()"></div>
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Bulk Release Claims</h3>
+            <button class="btn btn-ghost" onclick="closeBulkReleaseModal()">✕</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label class="form-label">Release claims for User ID</label>
+                <input type="number" id="bulk-release-user-id" class="form-control" placeholder="Enter user ID">
+            </div>
+            <div class="alert alert-warning" style="margin-top: 12px;">
+                <strong>Warning:</strong> This will release ALL active claims for the specified user.
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="closeBulkReleaseModal()">Cancel</button>
+            <button class="btn btn-danger" onclick="submitBulkRelease()">Release All Claims</button>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let selectedClaims = new Set();
+
+document.addEventListener('DOMContentLoaded', function() {
+    loadStats();
+    loadClaims();
+});
+
+async function loadStats() {
+    try {
+        const response = await fetch('/admin/v3/claims/stats');
+        if (!response.ok) throw new Error('Failed to load stats');
+        
+        const data = await response.json();
+        
+        document.getElementById('stat-total-claims').textContent = data.total_claims || 0;
+        document.getElementById('stat-active-claims').textContent = data.active_claims || 0;
+        document.getElementById('stat-released-claims').textContent = data.released_claims || 0;
+        document.getElementById('stat-daily-revenue').textContent = data.daily_revenue_display || '$0.00';
+        document.getElementById('stat-users-with-claims').textContent = data.users_with_claims || 0;
+        document.getElementById('stat-avg-claims').textContent = data.avg_claims_per_user?.toFixed(1) || '0';
+        
+    } catch (error) {
+        console.error('Error loading stats:', error);
+    }
+}
+
+async function loadClaims() {
+    const status = document.getElementById('status-filter').value;
+    const userId = document.getElementById('user-filter').value;
+    const caseId = document.getElementById('case-filter').value;
+    
+    let url = '/admin/v3/claims?limit=200';
+    if (status === 'active') url += '&active_only=true';
+    if (userId) url += `&user_id=${userId}`;
+    if (caseId) url += `&case_id=${caseId}`;
+    
+    try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Failed to load claims');
+        
+        const data = await response.json();
+        const claims = data.claims || [];
+        
+        document.getElementById('claim-count').textContent = `${claims.length} claim${claims.length !== 1 ? 's' : ''}`;
+        
+        const tbody = document.getElementById('claims-body');
+        
+        if (claims.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="8" style="text-align: center; padding: 40px; color: var(--text-muted);">
+                        No claims found.
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+        
+        tbody.innerHTML = claims.map(claim => `
+            <tr data-claim-id="${claim.id}">
+                <td>
+                    <input type="checkbox" 
+                           onchange="toggleClaimSelection(${claim.id})" 
+                           ${selectedClaims.has(claim.id) ? 'checked' : ''}
+                           ${!claim.is_active ? 'disabled' : ''}>
+                </td>
+                <td>
+                    <a href="/cases/${claim.case_id}" class="text-primary" target="_blank">
+                        Case #${claim.case_id}
+                    </a>
+                    <div style="font-size: 11px; color: var(--text-muted);">${claim.case_number || ''}</div>
+                </td>
+                <td>
+                    User #${claim.user_id}
+                    <div style="font-size: 11px; color: var(--text-muted);">${claim.user_email || ''}</div>
+                </td>
+                <td>
+                    ${formatDate(claim.claimed_at)}
+                    <div style="font-size: 11px; color: var(--text-muted);">${formatDays(claim.claimed_at)} days</div>
+                </td>
+                <td>
+                    <span class="badge ${getScoreClass(claim.score_at_claim)}">${claim.score_at_claim}</span>
+                </td>
+                <td><strong>${claim.price_display || formatPrice(claim.price_cents)}</strong></td>
+                <td>
+                    ${claim.is_active ? 
+                        '<span class="badge badge-success">Active</span>' : 
+                        '<span class="badge badge-neutral">Released</span>'
+                    }
+                </td>
+                <td>
+                    ${claim.is_active ? `
+                        <button class="btn btn-ghost btn-sm" onclick="releaseClaim(${claim.id}, ${claim.case_id})" title="Release">🔓</button>
+                        <button class="btn btn-ghost btn-sm" onclick="showReassignModal(${claim.case_id}, ${claim.user_id})" title="Reassign">👤</button>
+                    ` : `
+                        <span style="color: var(--text-muted); font-size: 12px;">${formatDate(claim.released_at)}</span>
+                    `}
+                </td>
+            </tr>
+        `).join('');
+        
+        selectedClaims.clear();
+        updateBulkActions();
+        
+    } catch (error) {
+        console.error('Error loading claims:', error);
+        document.getElementById('claims-body').innerHTML = `
+            <tr>
+                <td colspan="8" style="text-align: center; padding: 40px; color: var(--danger);">
+                    Error loading claims.
+                </td>
+            </tr>
+        `;
+    }
+}
+
+function getScoreClass(score) {
+    if (score >= 80) return 'badge-success';
+    if (score >= 60) return 'badge-info';
+    if (score >= 40) return 'badge-warning';
+    return 'badge-danger';
+}
+
+function formatDate(dateStr) {
+    if (!dateStr) return '—';
+    try {
+        const d = new Date(dateStr);
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        const year = d.getFullYear();
+        return `${month}/${day}/${year}`;
+    } catch {
+        return dateStr;
+    }
+}
+
+function formatDays(dateStr) {
+    if (!dateStr) return 0;
+    try {
+        const claimed = new Date(dateStr);
+        const now = new Date();
+        const diff = Math.floor((now - claimed) / (1000 * 60 * 60 * 24));
+        return Math.max(1, diff);
+    } catch {
+        return 1;
+    }
+}
+
+function formatPrice(cents) {
+    if (!cents) return '$0.00';
+    return '$' + (cents / 100).toFixed(2);
+}
+
+function toggleSelectAll() {
+    const checked = document.getElementById('select-all').checked;
+    const checkboxes = document.querySelectorAll('#claims-body input[type="checkbox"]:not(:disabled)');
+    
+    checkboxes.forEach(cb => {
+        cb.checked = checked;
+        const claimId = parseInt(cb.closest('tr').dataset.claimId);
+        if (checked) {
+            selectedClaims.add(claimId);
+        } else {
+            selectedClaims.delete(claimId);
+        }
+    });
+    
+    updateBulkActions();
+}
+
+function toggleClaimSelection(claimId) {
+    if (selectedClaims.has(claimId)) {
+        selectedClaims.delete(claimId);
+    } else {
+        selectedClaims.add(claimId);
+    }
+    updateBulkActions();
+}
+
+function updateBulkActions() {
+    const bulkActions = document.getElementById('bulk-actions');
+    bulkActions.style.display = selectedClaims.size > 0 ? 'flex' : 'none';
+}
+
+async function releaseClaim(claimId, caseId) {
+    if (!confirm('Release this claim?')) return;
+    
+    try {
+        const response = await fetch(`/api/v3/cases/${caseId}/release`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+        });
+        
+        if (!response.ok) {
+            const data = await response.json();
+            throw new Error(data.detail || 'Failed to release');
+        }
+        
+        loadClaims();
+        loadStats();
+        
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+function showReassignModal(caseId, currentUserId) {
+    document.getElementById('reassign-case-id').value = caseId;
+    document.getElementById('reassign-case-info').textContent = `Case #${caseId} (currently assigned to User #${currentUserId})`;
+    document.getElementById('reassign-user-id').value = '';
+    document.getElementById('reassign-modal').style.display = 'flex';
+}
+
+function closeReassignModal() {
+    document.getElementById('reassign-modal').style.display = 'none';
+}
+
+async function submitReassign() {
+    const caseId = document.getElementById('reassign-case-id').value;
+    const newUserId = document.getElementById('reassign-user-id').value;
+    
+    try {
+        const response = await fetch(`/api/v3/admin/cases/${caseId}/reassign`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: newUserId ? parseInt(newUserId) : null }),
+        });
+        
+        if (!response.ok) {
+            const data = await response.json();
+            throw new Error(data.detail || 'Failed to reassign');
+        }
+        
+        closeReassignModal();
+        loadClaims();
+        loadStats();
+        
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+function showBulkReleaseModal() {
+    document.getElementById('bulk-release-modal').style.display = 'flex';
+}
+
+function closeBulkReleaseModal() {
+    document.getElementById('bulk-release-modal').style.display = 'none';
+}
+
+async function submitBulkRelease() {
+    const userId = document.getElementById('bulk-release-user-id').value;
+    
+    if (!userId) {
+        alert('Please enter a user ID');
+        return;
+    }
+    
+    if (!confirm(`Release ALL claims for User #${userId}?`)) return;
+    
+    try {
+        const response = await fetch(`/admin/v3/users/${userId}/release-all-claims`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+        });
+        
+        if (!response.ok) {
+            const data = await response.json();
+            throw new Error(data.detail || 'Failed to release claims');
+        }
+        
+        const data = await response.json();
+        alert(`Released ${data.released_count || 0} claims`);
+        
+        closeBulkReleaseModal();
+        loadClaims();
+        loadStats();
+        
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+async function bulkRelease() {
+    if (selectedClaims.size === 0) return;
+    
+    if (!confirm(`Release ${selectedClaims.size} selected claims?`)) return;
+    
+    const caseIds = [];
+    selectedClaims.forEach(claimId => {
+        const row = document.querySelector(`tr[data-claim-id="${claimId}"]`);
+        if (row) {
+            const caseLink = row.querySelector('a');
+            if (caseLink) {
+                const match = caseLink.href.match(/\/cases\/(\d+)/);
+                if (match) caseIds.push(parseInt(match[1]));
+            }
+        }
+    });
+    
+    try {
+        const response = await fetch('/api/v3/cases/release', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ case_ids: caseIds }),
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.detail || 'Failed to release');
+        }
+        
+        alert(`Released ${data.released?.length || 0} cases`);
+        loadClaims();
+        loadStats();
+        
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+function bulkReassign() {
+    const newUserId = prompt('Enter new user ID for selected claims:');
+    if (!newUserId) return;
+    
+    // Would need to implement bulk reassign endpoint
+    alert('Bulk reassign not yet implemented. Please reassign individually.');
+}
+
+function exportClaims() {
+    const status = document.getElementById('status-filter').value;
+    let url = '/admin/v3/claims?limit=5000';
+    if (status === 'active') url += '&active_only=true';
+    
+    fetch(url)
+        .then(r => r.json())
+        .then(data => {
+            const claims = data.claims || [];
+            
+            let csv = 'Claim ID,Case ID,User ID,Claimed At,Released At,Score,Price/Day,Status\n';
+            claims.forEach(c => {
+                csv += `${c.id},${c.case_id},${c.user_id},"${c.claimed_at}","${c.released_at || ''}",${c.score_at_claim},${c.price_cents/100},${c.is_active ? 'Active' : 'Released'}\n`;
+            });
+            
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `claims-${new Date().toISOString().split('T')[0]}.csv`;
+            a.click();
+        });
+}
+</script>
+
+<style>
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-backdrop {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+}
+
+.modal-content {
+    position: relative;
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    width: 100%;
+    max-width: 480px;
+    margin: 20px;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-md);
+    border-bottom: 1px solid var(--border);
+}
+
+.modal-body {
+    padding: var(--space-md);
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: var(--space-md);
+    border-top: 1px solid var(--border);
+}
+
+.badge-success { background: var(--success-light); color: var(--success); }
+.badge-warning { background: var(--warning-light); color: #b45309; }
+.badge-danger { background: var(--danger-light); color: var(--danger); }
+.badge-info { background: #dbeafe; color: #1d4ed8; }
+.badge-neutral { background: var(--bg-alt); color: var(--text-muted); }
+
+.alert-warning {
+    background: #fef3c7;
+    border: 1px solid #f59e0b;
+    color: #92400e;
+    padding: 12px;
+    border-radius: var(--radius-md);
+}
+</style>
+{% endblock %}

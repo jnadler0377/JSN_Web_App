@@ -1,0 +1,617 @@
+{% extends "base.html" %}
+{% block title %}Admin - Billing Dashboard{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Billing Dashboard</h1>
+        <p class="page-subtitle">Manage invoices and view billing statistics.</p>
+    </div>
+    <div style="display: flex; gap: 8px; align-items: center;">
+        <span id="stripe-status" class="badge badge-neutral" style="font-size: 12px;">Checking Stripe...</span>
+        <button class="btn btn-secondary" onclick="refreshStats()">🔄 Refresh</button>
+        <button class="btn btn-primary" onclick="generateDailyInvoices()">📄 Generate Invoices</button>
+        <button class="btn btn-success" onclick="chargeAllPending()" style="background: var(--success);" id="charge-all-btn">💳 Charge All Pending</button>
+    </div>
+</div>
+
+<!-- Stripe Setup Notice (hidden by default) -->
+<div id="stripe-notice" class="card" style="margin-bottom: var(--space-lg); display: none; border-left: 4px solid var(--warning);">
+    <div class="card-body" style="display: flex; align-items: center; gap: 16px;">
+        <div style="font-size: 32px;">⚠️</div>
+        <div style="flex: 1;">
+            <h4 style="margin: 0 0 8px 0; color: #b45309;">Stripe Not Configured</h4>
+            <p style="margin: 0; color: var(--text-secondary);">
+                Automatic payment charging is disabled. To enable it, add your Stripe API keys to the <code>.env</code> file:
+            </p>
+            <pre style="margin: 12px 0 0 0; padding: 12px; background: var(--bg-alt); border-radius: var(--radius-md); font-size: 13px; overflow-x: auto;">STRIPE_SECRET_KEY=sk_live_your_key_here
+STRIPE_PUBLISHABLE_KEY=pk_live_your_key_here</pre>
+        </div>
+    </div>
+</div>
+
+<!-- Stats Cards -->
+<div class="stats-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-md); margin-bottom: var(--space-xl);">
+    <div class="card">
+        <div class="card-body" style="text-align: center;">
+            <div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px;">Total Billed</div>
+            <div id="stat-total-billed" style="font-size: 28px; font-weight: 700; color: var(--primary);">$0.00</div>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-body" style="text-align: center;">
+            <div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px;">Total Collected</div>
+            <div id="stat-total-collected" style="font-size: 28px; font-weight: 700; color: var(--success);">$0.00</div>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-body" style="text-align: center;">
+            <div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px;">Pending</div>
+            <div id="stat-pending" style="font-size: 28px; font-weight: 700; color: var(--warning);">$0.00</div>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-body" style="text-align: center;">
+            <div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px;">Failed</div>
+            <div id="stat-failed" style="font-size: 28px; font-weight: 700; color: var(--danger);">$0.00</div>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-body" style="text-align: center;">
+            <div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px;">Active Claims</div>
+            <div id="stat-active-claims" style="font-size: 28px; font-weight: 700;">0</div>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-body" style="text-align: center;">
+            <div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px;">Total Claims Value</div>
+            <div id="stat-daily-revenue" style="font-size: 28px; font-weight: 700; color: var(--info);">$0.00</div>
+        </div>
+    </div>
+</div>
+
+<!-- Filters and Actions -->
+<div class="card" style="margin-bottom: var(--space-lg);">
+    <div class="card-body">
+        <div style="display: flex; gap: var(--space-md); flex-wrap: wrap; align-items: center;">
+            <div class="form-group" style="margin: 0;">
+                <label class="form-label" for="status-filter">Status Filter</label>
+                <select id="status-filter" class="form-control" onchange="loadInvoices()">
+                    <option value="">All Statuses</option>
+                    <option value="pending">Pending</option>
+                    <option value="paid">Paid</option>
+                    <option value="failed">Failed</option>
+                    <option value="cancelled">Cancelled</option>
+                </select>
+            </div>
+            <div class="form-group" style="margin: 0;">
+                <label class="form-label" for="user-filter">User ID</label>
+                <input type="number" id="user-filter" class="form-control" placeholder="All users" style="width: 120px;">
+            </div>
+            <div style="margin-left: auto; display: flex; gap: 8px; align-items: flex-end;">
+                <button class="btn btn-secondary" onclick="loadInvoices()">🔍 Search</button>
+                <button class="btn btn-ghost" onclick="exportInvoices()">📥 Export</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Invoices Table -->
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Recent Invoices</h3>
+        <span id="invoice-count" class="badge badge-neutral">—</span>
+    </div>
+    <div class="card-body" style="padding: 0;">
+        <div id="invoices-table" style="overflow-x: auto;">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Invoice #</th>
+                        <th>User</th>
+                        <th>Date</th>
+                        <th>Amount</th>
+                        <th>Status</th>
+                        <th>Payment</th>
+                        <th style="width: 180px;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="invoices-body">
+                    <tr>
+                        <td colspan="7" style="text-align: center; padding: 40px; color: var(--text-muted);">
+                            Loading invoices...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Generate Invoice Modal -->
+<div id="generate-modal" class="modal" style="display: none;">
+    <div class="modal-backdrop" onclick="closeGenerateModal()"></div>
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Generate Daily Invoices</h3>
+            <button class="btn btn-ghost" onclick="closeGenerateModal()">✕</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label class="form-label" for="billing-date">Billing Date</label>
+                <input type="date" id="billing-date" class="form-control">
+                <small class="form-text">Defaults to yesterday if empty.</small>
+            </div>
+            <div class="form-group">
+                <label class="form-label">
+                    <input type="checkbox" id="sync-stripe" checked> Sync to Stripe
+                </label>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="closeGenerateModal()">Cancel</button>
+            <button class="btn btn-primary" onclick="runGenerateInvoices()">Generate Invoices</button>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Load data on page load
+document.addEventListener('DOMContentLoaded', function() {
+    checkStripeStatus();
+    loadStats();
+    loadInvoices();
+});
+
+async function checkStripeStatus() {
+    try {
+        const response = await fetch('/api/v3/payment/config');
+        const data = await response.json();
+        
+        const statusEl = document.getElementById('stripe-status');
+        const noticeEl = document.getElementById('stripe-notice');
+        const chargeBtn = document.getElementById('charge-all-btn');
+        
+        if (data.configured) {
+            statusEl.className = 'badge badge-success';
+            statusEl.textContent = '✓ Stripe Connected';
+            noticeEl.style.display = 'none';
+        } else {
+            statusEl.className = 'badge badge-warning';
+            statusEl.textContent = '⚠️ Stripe Not Configured';
+            noticeEl.style.display = 'block';
+            chargeBtn.style.opacity = '0.5';
+            chargeBtn.title = 'Stripe must be configured to charge invoices';
+        }
+    } catch (error) {
+        console.error('Error checking Stripe status:', error);
+        document.getElementById('stripe-status').textContent = '? Unknown';
+    }
+}
+
+async function loadStats() {
+    try {
+        const response = await fetch('/api/v3/admin/billing/summary');
+        if (!response.ok) throw new Error('Failed to load stats');
+        
+        const data = await response.json();
+        
+        document.getElementById('stat-total-billed').textContent = data.total_billed_display || '$0.00';
+        document.getElementById('stat-total-collected').textContent = data.total_collected_display || '$0.00';
+        document.getElementById('stat-active-claims').textContent = data.active_claims || 0;
+        document.getElementById('stat-daily-revenue').textContent = data.estimated_daily_revenue_display || '$0.00';
+        
+        // Status breakdown
+        const summary = data.status_summary || {};
+        document.getElementById('stat-pending').textContent = summary.pending?.amount_display || '$0.00';
+        document.getElementById('stat-failed').textContent = summary.failed?.amount_display || '$0.00';
+        
+    } catch (error) {
+        console.error('Error loading stats:', error);
+    }
+}
+
+async function loadInvoices() {
+    const status = document.getElementById('status-filter').value;
+    const userId = document.getElementById('user-filter').value;
+    
+    let url = '/api/v3/admin/billing/invoices?limit=100';
+    if (status) url += `&status=${status}`;
+    if (userId) url += `&user_id=${userId}`;
+    
+    console.log('Fetching invoices from:', url);
+    
+    try {
+        const response = await fetch(url);
+        console.log('Response status:', response.status);
+        
+        if (!response.ok) throw new Error('Failed to load invoices');
+        
+        const data = await response.json();
+        console.log('Full API response:', data);
+        
+        const invoices = data.invoices || [];
+        console.log('Invoices array:', invoices);
+        
+        if (invoices.length > 0) {
+            console.log('First invoice details:', JSON.stringify(invoices[0], null, 2));
+        }
+        
+        document.getElementById('invoice-count').textContent = `${invoices.length} invoice${invoices.length !== 1 ? 's' : ''}`;
+        
+        const tbody = document.getElementById('invoices-body');
+        
+        if (invoices.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="7" style="text-align: center; padding: 40px; color: var(--text-muted);">
+                        No invoices found.
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+        
+        tbody.innerHTML = invoices.map(inv => {
+            const status = (inv.status || '').toLowerCase();
+            const isPending = status === 'pending';
+            const isPaid = status === 'paid';
+            const hasPaid = inv.stripe_payment_intent || inv.paid_at;
+            
+            // Payment column - show if charged via Stripe
+            let paymentBadge = '';
+            if (isPaid && hasPaid) {
+                paymentBadge = `<span class="badge badge-success">✓ Charged</span>`;
+            } else if (isPaid) {
+                paymentBadge = `<span class="badge badge-success">✓ Manual</span>`;
+            } else if (isPending) {
+                paymentBadge = `<span class="badge badge-warning">Awaiting</span>`;
+            } else {
+                paymentBadge = `<span class="badge badge-neutral">${inv.status || '—'}</span>`;
+            }
+            
+            return `
+            <tr>
+                <td><strong>${inv.invoice_number}</strong></td>
+                <td>${inv.user_email || `User #${inv.user_id}`}</td>
+                <td>${formatDate(inv.invoice_date)}</td>
+                <td><strong>${inv.total_display}</strong></td>
+                <td>
+                    <span class="badge ${getStatusClass(inv.status)}">${inv.status || 'unknown'}</span>
+                </td>
+                <td>${paymentBadge}</td>
+                <td>
+                    <div style="display: flex; gap: 4px; flex-wrap: wrap;">
+                        <button class="btn btn-ghost btn-sm" onclick="viewInvoice(${inv.id})" title="View">👁️</button>
+                        ${isPending ? `
+                            <button class="btn btn-sm" onclick="chargeInvoice(${inv.id})" title="Charge customer's card" style="background: var(--success); color: white;">💳 Charge</button>
+                            <button class="btn btn-ghost btn-sm" onclick="markPaid(${inv.id})" title="Mark as Paid manually">✅</button>
+                            <button class="btn btn-ghost btn-sm" onclick="markFailed(${inv.id})" title="Mark as Failed">❌</button>
+                        ` : ''}
+                    </div>
+                </td>
+            </tr>
+        `}).join('');
+        
+    } catch (error) {
+        console.error('Error loading invoices:', error);
+        document.getElementById('invoices-body').innerHTML = `
+            <tr>
+                <td colspan="7" style="text-align: center; padding: 40px; color: var(--danger);">
+                    Error loading invoices.
+                </td>
+            </tr>
+        `;
+    }
+}
+
+function getStatusClass(status) {
+    const s = (status || '').toLowerCase();
+    const classes = {
+        'paid': 'badge-success',
+        'pending': 'badge-warning',
+        'failed': 'badge-danger',
+        'cancelled': 'badge-neutral',
+    };
+    return classes[s] || 'badge-neutral';
+}
+
+function formatDate(dateStr) {
+    if (!dateStr) return '—';
+    try {
+        const d = new Date(dateStr);
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        const year = d.getFullYear();
+        return `${month}/${day}/${year}`;
+    } catch {
+        return dateStr;
+    }
+}
+
+function refreshStats() {
+    loadStats();
+    loadInvoices();
+}
+
+function generateDailyInvoices() {
+    document.getElementById('generate-modal').style.display = 'flex';
+}
+
+function closeGenerateModal() {
+    document.getElementById('generate-modal').style.display = 'none';
+}
+
+async function runGenerateInvoices() {
+    const billingDate = document.getElementById('billing-date').value;
+    const syncStripe = document.getElementById('sync-stripe').checked;
+    
+    const body = {};
+    if (billingDate) body.billing_date = billingDate;
+    
+    try {
+        const response = await fetch('/api/v3/admin/billing/generate-daily', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.detail || 'Failed to generate invoices');
+        }
+        
+        const results = data.results || {};
+        alert(`Generated ${results.invoices_generated || 0} invoices\nTotal: ${results.total_billed_cents ? '$' + (results.total_billed_cents/100).toFixed(2) : '$0.00'}`);
+        
+        closeGenerateModal();
+        loadStats();
+        loadInvoices();
+        
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+async function chargeAllPending() {
+    if (!confirm('Charge ALL pending invoices?\n\nThis will attempt to charge each invoice using the customer\'s stored payment method.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/admin/v3/billing/charge-all-pending', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+            const errorMsg = data.detail || 'Failed to charge invoices';
+            
+            if (errorMsg.includes('not configured')) {
+                alert('⚠️ Stripe Not Configured\n\nTo enable automatic charging:\n\n1. Add STRIPE_SECRET_KEY to your .env file\n2. Add STRIPE_PUBLISHABLE_KEY to your .env file\n3. Restart the server\n\nContact support if you need help setting up Stripe.');
+            } else {
+                alert('Error: ' + errorMsg);
+            }
+            return;
+        }
+        
+        const results = data.results || {};
+        let message = `Charging Complete!\n\n`;
+        message += `✓ Paid: ${results.successful || 0} (${results.total_charged_display || '$0.00'})\n`;
+        message += `✗ Failed: ${results.failed || 0}\n`;
+        message += `⏭ Skipped: ${results.skipped || 0} (no payment method)\n`;
+        
+        alert(message);
+        
+        loadStats();
+        loadInvoices();
+        
+    } catch (error) {
+        if (error.message.includes('not configured')) {
+            alert('⚠️ Stripe Not Configured\n\nTo enable automatic charging:\n\n1. Add STRIPE_SECRET_KEY to your .env file\n2. Add STRIPE_PUBLISHABLE_KEY to your .env file\n3. Restart the server');
+        } else {
+            alert('Error: ' + error.message);
+        }
+    }
+}
+
+async function chargeInvoice(invoiceId) {
+    if (!confirm('Charge this invoice now?\n\nThis will charge the customer\'s card on file.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/admin/v3/billing/charge-invoice/${invoiceId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+            const errorMsg = data.detail || 'Failed to charge invoice';
+            
+            // Check for common errors and provide helpful messages
+            if (errorMsg.includes('not configured')) {
+                alert('⚠️ Stripe Not Configured\n\nTo enable automatic charging:\n\n1. Add STRIPE_SECRET_KEY to your .env file\n2. Add STRIPE_PUBLISHABLE_KEY to your .env file\n3. Restart the server\n\nContact support if you need help setting up Stripe.');
+            } else if (errorMsg.includes('no payment method')) {
+                alert('⚠️ No Payment Method\n\nThis user has not added a payment method yet.\n\nThey need to visit Billing → Payment Method to add a card.');
+            } else {
+                alert('Error: ' + errorMsg);
+            }
+            return;
+        }
+        
+        alert('✓ Payment successful!\n\nInvoice has been charged to the customer\'s card.');
+        loadInvoices();
+        loadStats();
+        
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+async function viewInvoice(invoiceId) {
+    try {
+        const response = await fetch(`/api/v3/billing/invoices/${invoiceId}`);
+        if (!response.ok) throw new Error('Failed to load invoice');
+        
+        const data = await response.json();
+        
+        // Show in a simple alert for now - could be a modal
+        let details = `Invoice: ${data.invoice_number}\n`;
+        details += `Status: ${data.status}\n`;
+        details += `Total: ${data.total_display}\n`;
+        details += `\nLine Items:\n`;
+        
+        (data.lines || []).forEach(line => {
+            details += `  - ${line.description}: ${line.amount_display}\n`;
+        });
+        
+        if (data.stripe_hosted_url) {
+            details += `\nStripe URL: ${data.stripe_hosted_url}`;
+        }
+        
+        alert(details);
+        
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+async function markPaid(invoiceId) {
+    if (!confirm('Mark this invoice as paid?')) return;
+    
+    try {
+        const response = await fetch(`/api/v3/admin/billing/invoices/${invoiceId}/mark-paid`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+        });
+        
+        if (!response.ok) {
+            const data = await response.json();
+            throw new Error(data.detail || 'Failed to mark paid');
+        }
+        
+        loadInvoices();
+        loadStats();
+        
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+async function markFailed(invoiceId) {
+    const reason = prompt('Enter failure reason (optional):');
+    
+    try {
+        const response = await fetch(`/api/v3/admin/billing/invoices/${invoiceId}/mark-failed`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason }),
+        });
+        
+        if (!response.ok) {
+            const data = await response.json();
+            throw new Error(data.detail || 'Failed to mark as failed');
+        }
+        
+        loadInvoices();
+        loadStats();
+        
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+function exportInvoices() {
+    // Simple CSV export
+    const status = document.getElementById('status-filter').value;
+    let url = '/api/v3/admin/billing/invoices?limit=1000';
+    if (status) url += `&status=${status}`;
+    
+    fetch(url)
+        .then(r => r.json())
+        .then(data => {
+            const invoices = data.invoices || [];
+            
+            let csv = 'Invoice Number,User ID,User Email,Date,Amount,Status,Stripe ID\n';
+            invoices.forEach(inv => {
+                csv += `"${inv.invoice_number}",${inv.user_id},"${inv.user_email || ''}","${inv.invoice_date}","${inv.total_display}","${inv.status}","${inv.stripe_invoice_id || ''}"\n`;
+            });
+            
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `invoices-${new Date().toISOString().split('T')[0]}.csv`;
+            a.click();
+        });
+}
+</script>
+
+<style>
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-backdrop {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+}
+
+.modal-content {
+    position: relative;
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    width: 100%;
+    max-width: 480px;
+    margin: 20px;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-md);
+    border-bottom: 1px solid var(--border);
+}
+
+.modal-body {
+    padding: var(--space-md);
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: var(--space-md);
+    border-top: 1px solid var(--border);
+}
+
+.badge-success { background: var(--success-light); color: var(--success); }
+.badge-warning { background: var(--warning-light); color: #b45309; }
+.badge-danger { background: var(--danger-light); color: var(--danger); }
+.badge-neutral { background: var(--bg-alt); color: var(--text-muted); }
+</style>
+{% endblock %}

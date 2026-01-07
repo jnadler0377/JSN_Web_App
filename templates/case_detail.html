@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{% if visibility and visibility.can_view_sensitive %}{{ case.case_number }}{% else %}Case ****{{ case.case_number[-4:] if case.case_number and case.case_number|length > 4 else '****' }}{% endif %} - JSN Holdings{% endblock %}
+{% block title %}{{ case.case_number }} - JSN Holdings{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -558,139 +558,35 @@
     user-select: none;
     pointer-events: none;
 }
-
-/* Claim Confirmation Modal */
-#claim-confirm-modal {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 9999;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-#claim-confirm-modal .modal-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.6);
-    backdrop-filter: blur(4px);
-}
-
-#claim-confirm-modal .modal-content {
-    position: relative;
-    background: var(--surface);
-    border-radius: var(--radius-lg);
-    max-width: 560px;
-    width: 90%;
-    max-height: 90vh;
-    overflow-y: auto;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-    animation: modalSlideIn 0.2s ease-out;
-}
-
-@keyframes modalSlideIn {
-    from {
-        opacity: 0;
-        transform: translateY(-20px) scale(0.95);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0) scale(1);
-    }
-}
-
-#claim-confirm-modal .modal-header {
-    padding: 20px 24px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-
-#claim-confirm-modal .modal-close {
-    background: none;
-    border: none;
-    font-size: 28px;
-    cursor: pointer;
-    color: var(--text-muted);
-    line-height: 1;
-    padding: 0;
-}
-
-#claim-confirm-modal .modal-close:hover {
-    color: var(--text);
-}
-
-#claim-confirm-modal .modal-body {
-    padding: 24px;
-}
-
-#claim-confirm-modal .modal-footer {
-    padding: 16px 24px;
-    border-top: 1px solid var(--border);
-    background: var(--bg-alt);
-}
 </style>
 {% endblock %}
 
 {% block content %}
-{% set is_admin = current_user.is_admin if current_user and current_user.is_admin is defined else (current_user.role == 'admin' if current_user and current_user.role is defined else false) %}
 <!-- Case Header -->
 <div class="case-header">
     <div class="case-header-left">
-        {% if visibility and visibility.can_view_sensitive %}
-            <h1>{{ case.case_number }}</h1>
-        {% else %}
-            <h1>🔒 Case #****{{ case.case_number[-4:] if case.case_number and case.case_number|length > 4 else '****' }}</h1>
-        {% endif %}
+        <h1>{{ case.case_number }}</h1>
         <div class="case-meta">
-            {% if visibility and visibility.can_view_sensitive %}
-                <span>📍 {{ (case.address_override or case.address or 'No address')|title }}</span>
-                <span>🏷️ Parcel: {{ case.parcel_id or '—' }}</span>
-            {% else %}
-                {% set addr = (case.address_override or case.address or '')|string %}
-                {% if addr and ',' in addr %}
-                    <span>📍 ***, {{ addr.split(',')[1:]|join(',') }}</span>
-                {% elif addr %}
-                    <span>📍 🔒 Address hidden</span>
-                {% else %}
-                    <span>📍 No address</span>
-                {% endif %}
-                <span>🏷️ Parcel: 🔒 Hidden</span>
-            {% endif %}
+            <span>📍 {{ (case.address_override or case.address or 'No address')|title }}</span>
             <span>📅 Filed: {{ case.filing_datetime or '—' }}</span>
-            {% if visibility and visibility.can_view_sensitive %}
-                {% if case.style %}<span>⚖️ {{ case.style }}</span>{% endif %}
-            {% else %}
-                {% if case.style %}<span>⚖️ 🔒 {{ case.style[:15] }}...</span>{% endif %}
-            {% endif %}
+            {% if case.style %}<span>⚖️ {{ case.style }}</span>{% endif %}
         </div>
     </div>
     <div class="case-actions">
-        <!-- V3: Claim Status and Action using visibility -->
-        {% set is_owner = visibility.is_owner if visibility else false %}
-        {% set is_claimed = visibility.is_claimed if visibility else (case.assigned_to is not none) %}
-        {% set can_claim = visibility.can_claim if visibility else false %}
-        {% set can_release = visibility.can_release if visibility else false %}
+        <!-- V3: Claim Status and Action -->
+        {% set is_owner = case.assigned_to == current_user.id if current_user else False %}
+        {% set is_claimed = case.assigned_to is not none %}
         
         {% if is_owner %}
             <div class="claim-status-banner owned">
                 <span>🔒 You own this case</span>
                 {% if claim_info %}
-                    <span style="opacity: 0.8;">• Price: {{ claim_info.price_display }}</span>
+                    <span style="opacity: 0.8;">• Score: {{ claim_info.score_at_claim }} • {{ claim_info.price_display }}/day</span>
                 {% endif %}
             </div>
-            {% if is_admin %}
             <button class="btn btn-secondary" onclick="releaseCase({{ case.id }})">
                 🔓 Release Case
             </button>
-            {% endif %}
         {% elif is_claimed %}
             <div class="claim-status-banner claimed">
                 <span>🔒 Claimed by another user</span>
@@ -699,24 +595,18 @@
             <div class="claim-status-banner available">
                 <span>Available to claim</span>
             </div>
-            {% if can_claim %}
             <button class="btn btn-primary" onclick="claimCase({{ case.id }})" id="claim-btn">
                 🔒 Claim Case
             </button>
-            {% endif %}
         {% endif %}
         
-        {% if not has_property_data and (is_owner or (visibility and visibility.can_view_sensitive)) %}
+        {% if not has_property_data %}
         <form method="post" action="/cases/{{ case.id }}/property-lookup" style="display: inline;">
             <button type="submit" class="btn btn-secondary">🔍 Fetch Property Data</button>
         </form>
         {% endif %}
         <a href="/cases/{{ case.id }}/comparables" class="btn btn-secondary">📊 Comparables</a>
-        {% if visibility and visibility.can_view_sensitive %}
         <button class="btn btn-secondary" onclick="generateCaseReport({{ case.id }})">📄 Generate Report</button>
-        {% else %}
-        <button class="btn btn-secondary" disabled title="Claim this case to generate reports" style="opacity: 0.5; cursor: not-allowed;">📄 Generate Report</button>
-        {% endif %}
         <a href="/cases" class="btn btn-ghost">← Back to Cases</a>
     </div>
 </div>
@@ -778,77 +668,8 @@ function toggleParcelEdit(show) {
 // V3: CLAIM FUNCTIONALITY
 // ============================================================
 
-async function claimCase(caseId, price) {
-    // Show confirmation modal
-    showClaimConfirmation(caseId, price);
-}
-
-function showClaimConfirmation(caseId, price) {
-    // Remove any existing modal
-    const existingModal = document.getElementById('claim-confirm-modal');
-    if (existingModal) existingModal.remove();
-    
-    const priceDisplay = price ? `$${price}` : 'the displayed price';
-    
-    const modal = document.createElement('div');
-    modal.id = 'claim-confirm-modal';
-    modal.innerHTML = `
-        <div class="modal-overlay" onclick="closeClaimModal()"></div>
-        <div class="modal-content claim-confirm-modal">
-            <div class="modal-header">
-                <h3 style="margin: 0; display: flex; align-items: center; gap: 8px;">
-                    <span style="font-size: 24px;">⚠️</span> Confirm Case Claim
-                </h3>
-                <button class="modal-close" onclick="closeClaimModal()">&times;</button>
-            </div>
-            <div class="modal-body">
-                <p style="font-weight: 600; margin-bottom: 16px;">You are about to claim this case.</p>
-                <p style="margin-bottom: 16px;">By claiming this case, you acknowledge and agree to the following:</p>
-                <ul style="list-style: none; padding: 0; margin: 0 0 20px 0;">
-                    <li style="padding: 8px 0; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; gap: 8px;">
-                        <span style="color: var(--primary);">•</span>
-                        <span>This case will be <strong>locked to your account</strong> and unavailable to other subscribers.</span>
-                    </li>
-                    <li style="padding: 8px 0; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; gap: 8px;">
-                        <span style="color: var(--primary);">•</span>
-                        <span>You will be billed <strong>${priceDisplay}</strong> based on the case score at the time of claim.</span>
-                    </li>
-                    <li style="padding: 8px 0; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; gap: 8px;">
-                        <span style="color: var(--primary);">•</span>
-                        <span>Charges apply <strong>immediately</strong> and will appear on your daily invoice.</span>
-                    </li>
-                    <li style="padding: 8px 0; display: flex; align-items: flex-start; gap: 8px;">
-                        <span style="color: var(--danger);">•</span>
-                        <span>Claimed cases <strong>cannot be released, refunded, or transferred</strong> once billing has occurred.</span>
-                    </li>
-                </ul>
-                <div style="background: var(--warning-light); padding: 12px 16px; border-radius: var(--radius-md); border-left: 4px solid var(--warning);">
-                    <strong style="color: #b45309;">⚠️ Do not proceed unless you intend to pay for this case.</strong>
-                </div>
-            </div>
-            <div class="modal-footer" style="display: flex; gap: 12px; justify-content: flex-end;">
-                <button class="btn btn-secondary" onclick="closeClaimModal()">Cancel</button>
-                <button class="btn btn-primary" onclick="confirmClaim(${caseId})" id="confirm-claim-btn">
-                    ✓ I Agree - Claim Case
-                </button>
-            </div>
-        </div>
-    `;
-    
-    document.body.appendChild(modal);
-    document.body.style.overflow = 'hidden';
-}
-
-function closeClaimModal() {
-    const modal = document.getElementById('claim-confirm-modal');
-    if (modal) {
-        modal.remove();
-        document.body.style.overflow = '';
-    }
-}
-
-async function confirmClaim(caseId) {
-    const btn = document.getElementById('confirm-claim-btn');
+async function claimCase(caseId) {
+    const btn = document.getElementById('claim-btn');
     if (btn) {
         btn.disabled = true;
         btn.textContent = 'Claiming...';
@@ -866,8 +687,7 @@ async function confirmClaim(caseId) {
         }
         
         const result = await response.json();
-        closeClaimModal();
-        showToast(`Case claimed for $${result.score}!`, 'success');
+        showToast(`Case claimed! Score: ${result.score}, ${result.price_display}/day`, 'success');
         
         // Reload page to show updated status
         setTimeout(() => window.location.reload(), 1000);
@@ -876,7 +696,7 @@ async function confirmClaim(caseId) {
         showToast(err.message, 'error');
         if (btn) {
             btn.disabled = false;
-            btn.textContent = '✓ I Agree - Claim Case';
+            btn.textContent = '🔒 Claim Case';
         }
     }
 }

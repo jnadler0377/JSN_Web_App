@@ -2,14 +2,17 @@
 {% block title %}Cases - JSN Holdings{% endblock %}
 
 {% block content %}
-{% set is_admin = current_user.is_admin if current_user and current_user.is_admin is defined else (current_user.role == 'admin' if current_user and current_user.role is defined else false) %}
 <div class="page-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
     <div>
         <h1 class="page-title">Cases</h1>
         <p class="page-subtitle">Manage your foreclosure cases and track progress.</p>
     </div>
     <div style="display: flex; gap: var(--space-sm); align-items: center;">
-        {% if is_admin %}
+        <!-- V3: My Claims Counter -->
+        <div id="claims-counter" class="claims-counter" style="display: none;">
+            <span class="claims-count">0</span>
+            <span class="claims-label">/ 50 claimed</span>
+        </div>
         <a href="/cases/new" class="btn btn-primary">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="12" cy="12" r="10"/>
@@ -18,7 +21,6 @@
             </svg>
             Add Case
         </a>
-        {% endif %}
     </div>
 </div>
 
@@ -83,11 +85,9 @@
                 <button type="button" id="btn-claim" class="btn btn-primary btn-sm" style="display: none;">
                     🔒 Claim Selected
                 </button>
-                {% if is_admin %}
                 <button type="button" id="btn-release" class="btn btn-secondary btn-sm" style="display: none;">
                     🔓 Release Selected
                 </button>
-                {% endif %}
                 
                 <div style="border-left: 1px solid var(--border); height: 32px; margin: 0 var(--space-sm);"></div>
                 
@@ -96,14 +96,12 @@
                 <button type="submit" id="btn-unarchive" formaction="/cases/unarchive" formmethod="post" class="btn btn-secondary btn-sm">Unarchive</button>
                 <button type="submit" id="btn-export" formaction="/cases/export" formmethod="post" class="btn btn-secondary btn-sm">Export CSV</button>
                 <button type="submit" id="btn-export-crm" formaction="/cases/export_crm" formmethod="post" class="btn btn-secondary btn-sm">Export CRM</button>
-                {% if is_admin %}
                 <button type="submit" id="btn-deal-calcs" formaction="/cases/reports/download" formmethod="post" class="btn btn-secondary btn-sm">Deal Calcs</button>
                 
                 <label style="display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-muted);">
                     <input type="checkbox" name="include_attachments" value="1" checked style="width: 14px; height: 14px;">
                     Include docs
                 </label>
-                {% endif %}
                 
                 <input type="hidden" name="show_archived" value="{{ 1 if show_archived else 0 }}">
                 <input type="hidden" name="page" value="{{ pagination.page }}">
@@ -161,7 +159,7 @@
                     </a>
                 </th>
                 <th style="width: 100px;">Status</th>
-                <th style="width: 70px;">Price</th>
+                <th style="width: 70px;">Score</th>
             </tr>
         </thead>
         <tbody id="case-tbody">
@@ -169,46 +167,19 @@
             {% set has_tags = c.archived or short_sale.get(c.id) or quick_flags.get(c.id, []) %}
             {% set is_mine = c.assigned_to == current_user.id if current_user else False %}
             {% set is_claimed = c.assigned_to is not none %}
-            {% set is_admin = current_user.is_admin if current_user and current_user.is_admin is defined else (current_user.role == 'admin' if current_user and current_user.role is defined else false) %}
-            {% set can_view_case = is_mine or is_admin %}
             <tr data-href="/cases/{{ c.id }}" data-id="{{ c.id }}" data-archived="{{ 1 if c.archived else 0 }}" 
                 data-claimed="{{ 1 if is_claimed else 0 }}" data-mine="{{ 1 if is_mine else 0 }}"
-                tabindex="0" role="link" aria-label="Open case"
+                tabindex="0" role="link" aria-label="Open case {{ c.case_number }}"
                 style="cursor: pointer; {% if c.archived %}opacity: 0.5;{% endif %}{% if has_tags %}border-bottom: none;{% endif %}">
                 <td onclick="event.stopPropagation()"{% if has_tags %} rowspan="2" style="vertical-align: middle;"{% endif %}>
                     <input type="checkbox" name="ids" value="{{ c.id }}" onclick="event.stopPropagation(); updateClaimButtons();" style="width: 18px; height: 18px;">
                 </td>
-                <!-- Case Number - masked for non-owners -->
-                <td>
-                    {% if can_view_case %}
-                        <strong style="color: var(--primary);">{{ c.case_number }}</strong>
-                    {% else %}
-                        <strong style="color: var(--text-muted);">🔒 ****{{ c.case_number[-4:] if c.case_number|length > 4 else '****' }}</strong>
-                    {% endif %}
-                </td>
+                <td><strong style="color: var(--primary);">{{ c.case_number }}</strong></td>
                 <td style="color: var(--text-secondary);">{{ c.filing_datetime }}</td>
-                <!-- Style - masked for non-owners -->
-                <td class="truncate" style="max-width: 200px;">
-                    {% if can_view_case %}
-                        {{ c.style }}
-                    {% else %}
-                        <span style="color: var(--text-muted);">🔒 {{ c.style[:10] if c.style else '' }}...</span>
-                    {% endif %}
-                </td>
-                <!-- Address - masked for non-owners -->
+                <td class="truncate" style="max-width: 200px;">{{ c.style }}</td>
                 <td>
                     {% set addr = (c.address_override or c.address or '').strip() %}
-                    {% if can_view_case %}
-                        {% if addr %}{{ addr }}{% else %}<span style="color: var(--text-muted);">—</span>{% endif %}
-                    {% else %}
-                        {% if addr and ',' in addr %}
-                            <span style="color: var(--text-muted);">🔒 ***{{ addr.split(',')[1:] | join(',') }}</span>
-                        {% elif addr %}
-                            <span style="color: var(--text-muted);">🔒 Hidden</span>
-                        {% else %}
-                            <span style="color: var(--text-muted);">—</span>
-                        {% endif %}
-                    {% endif %}
+                    {% if addr %}{{ addr }}{% else %}<span style="color: var(--text-muted);">—</span>{% endif %}
                 </td>
                 <!-- V3: Claim Status Column -->
                 <td onclick="event.stopPropagation()">
@@ -294,6 +265,26 @@
 
 {% block extra_css %}
 <style>
+/* V3: Claims Counter Styles */
+.claims-counter {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 12px;
+    background: var(--bg-alt);
+    border-radius: var(--radius-full);
+    font-size: 13px;
+}
+
+.claims-count {
+    font-weight: 700;
+    color: var(--primary);
+}
+
+.claims-label {
+    color: var(--text-muted);
+}
+
 /* V3: Claim button in table */
 .claim-btn {
     transition: all 0.2s ease;
@@ -333,99 +324,11 @@
     background: var(--bg-alt);
     color: var(--text-muted);
 }
-
-/* Claim Confirmation Modal */
-#claim-confirm-modal {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 9999;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-#claim-confirm-modal .modal-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.6);
-    backdrop-filter: blur(4px);
-}
-
-#claim-confirm-modal .modal-content {
-    position: relative;
-    background: var(--surface);
-    border-radius: var(--radius-lg);
-    max-width: 560px;
-    width: 90%;
-    max-height: 90vh;
-    overflow-y: auto;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-    animation: modalSlideIn 0.2s ease-out;
-}
-
-@keyframes modalSlideIn {
-    from {
-        opacity: 0;
-        transform: translateY(-20px) scale(0.95);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0) scale(1);
-    }
-}
-
-#claim-confirm-modal .modal-header {
-    padding: 20px 24px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-
-#claim-confirm-modal .modal-close {
-    background: none;
-    border: none;
-    font-size: 28px;
-    cursor: pointer;
-    color: var(--text-muted);
-    line-height: 1;
-    padding: 0;
-}
-
-#claim-confirm-modal .modal-close:hover {
-    color: var(--text);
-}
-
-#claim-confirm-modal .modal-body {
-    padding: 24px;
-}
-
-#claim-confirm-modal .modal-footer {
-    padding: 16px 24px;
-    border-top: 1px solid var(--border);
-    background: var(--bg-alt);
-}
 </style>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-// Deal Analysis Helper
-const DealAnalysis = {
-    getScoreClass: function(score) {
-        if (score >= 80) return 'excellent';
-        if (score >= 60) return 'good';
-        if (score >= 40) return 'fair';
-        return 'poor';
-    }
-};
-
 (function(){
     function qs(sel, root){ return (root||document).querySelector(sel); }
     function qsa(sel, root){ return Array.from((root||document).querySelectorAll(sel)); }
@@ -563,166 +466,35 @@ const DealAnalysis = {
     
     // Single case claim
     window.claimCase = async function(caseId) {
-        // Check if user has payment method first
-        try {
-            const response = await fetch('/api/v3/payment/status');
-            const data = await response.json();
-            
-            if (!data.can_claim) {
-                showPaymentRequiredModal();
-                return;
-            }
-        } catch (err) {
-            console.error('Error checking payment status:', err);
-            // Continue anyway if check fails
-        }
-        
-        showClaimConfirmation([caseId], false);
-    };
-    
-    // Show payment required modal
-    function showPaymentRequiredModal() {
-        const existingModal = document.getElementById('claim-confirm-modal');
-        if (existingModal) existingModal.remove();
-        
-        const modal = document.createElement('div');
-        modal.id = 'claim-confirm-modal';
-        modal.innerHTML = `
-            <div class="modal-overlay" onclick="closeClaimModal()"></div>
-            <div class="modal-content claim-confirm-modal">
-                <div class="modal-header">
-                    <h3 style="margin: 0; display: flex; align-items: center; gap: 8px;">
-                        <span style="font-size: 24px;">💳</span> Payment Method Required
-                    </h3>
-                    <button class="modal-close" onclick="closeClaimModal()">&times;</button>
-                </div>
-                <div class="modal-body">
-                    <div style="text-align: center; padding: 20px;">
-                        <div style="font-size: 64px; margin-bottom: 16px;">💳</div>
-                        <h3 style="margin: 0 0 12px 0;">Add a Payment Method to Claim Cases</h3>
-                        <p style="color: var(--text-secondary); margin-bottom: 24px;">
-                            Before you can claim cases, you need to add a payment method to your account. 
-                            Your card will be charged when invoices are generated.
-                        </p>
-                        <a href="/billing/payment-method" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 8px;">
-                            💳 Add Payment Method
-                        </a>
-                    </div>
-                </div>
-                <div class="modal-footer" style="display: flex; gap: 12px; justify-content: center;">
-                    <button class="btn btn-secondary" onclick="closeClaimModal()">Cancel</button>
-                </div>
-            </div>
-        `;
-        
-        document.body.appendChild(modal);
-        document.body.style.overflow = 'hidden';
-    }
-    
-    // Show claim confirmation modal
-    function showClaimConfirmation(caseIds, isBulk) {
-        // Remove any existing modal
-        const existingModal = document.getElementById('claim-confirm-modal');
-        if (existingModal) existingModal.remove();
-        
-        const caseCount = caseIds.length;
-        const caseText = caseCount === 1 ? 'this case' : `${caseCount} cases`;
-        
-        const modal = document.createElement('div');
-        modal.id = 'claim-confirm-modal';
-        modal.innerHTML = `
-            <div class="modal-overlay" onclick="closeClaimModal()"></div>
-            <div class="modal-content claim-confirm-modal">
-                <div class="modal-header">
-                    <h3 style="margin: 0; display: flex; align-items: center; gap: 8px;">
-                        <span style="font-size: 24px;">⚠️</span> Confirm Case Claim
-                    </h3>
-                    <button class="modal-close" onclick="closeClaimModal()">&times;</button>
-                </div>
-                <div class="modal-body">
-                    <p style="font-weight: 600; margin-bottom: 16px;">You are about to claim ${caseText}.</p>
-                    <p style="margin-bottom: 16px;">By claiming, you acknowledge and agree to the following:</p>
-                    <ul style="list-style: none; padding: 0; margin: 0 0 20px 0;">
-                        <li style="padding: 8px 0; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; gap: 8px;">
-                            <span style="color: var(--primary);">•</span>
-                            <span>This case will be <strong>locked to your account</strong> and unavailable to other subscribers.</span>
-                        </li>
-                        <li style="padding: 8px 0; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; gap: 8px;">
-                            <span style="color: var(--primary);">•</span>
-                            <span>You will be billed based on the <strong>case score</strong> at the time of claim.</span>
-                        </li>
-                        <li style="padding: 8px 0; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; gap: 8px;">
-                            <span style="color: var(--primary);">•</span>
-                            <span>Charges apply <strong>immediately</strong> and will appear on your daily invoice.</span>
-                        </li>
-                        <li style="padding: 8px 0; display: flex; align-items: flex-start; gap: 8px;">
-                            <span style="color: var(--danger);">•</span>
-                            <span>Claimed cases <strong>cannot be released, refunded, or transferred</strong> once billing has occurred.</span>
-                        </li>
-                    </ul>
-                    <div style="background: var(--warning-light); padding: 12px 16px; border-radius: var(--radius-md); border-left: 4px solid var(--warning);">
-                        <strong style="color: #b45309;">⚠️ Do not proceed unless you intend to pay for ${caseText}.</strong>
-                    </div>
-                </div>
-                <div class="modal-footer" style="display: flex; gap: 12px; justify-content: flex-end;">
-                    <button class="btn btn-secondary" onclick="closeClaimModal()">Cancel</button>
-                    <button class="btn btn-primary" onclick="confirmClaimCases([${caseIds.join(',')}], ${isBulk})" id="confirm-claim-btn">
-                        ✓ I Agree - Claim ${caseCount === 1 ? 'Case' : caseCount + ' Cases'}
-                    </button>
-                </div>
-            </div>
-        `;
-        
-        document.body.appendChild(modal);
-        document.body.style.overflow = 'hidden';
-    }
-    
-    window.closeClaimModal = function() {
-        const modal = document.getElementById('claim-confirm-modal');
-        if (modal) {
-            modal.remove();
-            document.body.style.overflow = '';
-        }
-    };
-    
-    window.confirmClaimCases = async function(caseIds, isBulk) {
-        const btn = document.getElementById('confirm-claim-btn');
+        const btn = qs(`.claim-btn[data-case-id="${caseId}"]`);
         if (btn) {
             btn.disabled = true;
-            btn.textContent = 'Claiming...';
+            btn.textContent = '...';
         }
         
         try {
-            const result = await postJSON('/api/v3/cases/claim', { case_ids: caseIds });
-            closeClaimModal();
+            const result = await postJSON('/api/v3/cases/claim', { case_ids: [caseId] });
+            showToast(`Case claimed! Score: ${result.score}, ${result.price_display}/day`);
             
-            if (isBulk) {
-                showToast(result.message);
-                setTimeout(() => window.location.reload(), 500);
-            } else {
-                showToast(`Case claimed for $${result.score}!`);
+            // Update the row
+            const tr = qs(`tr[data-id="${caseId}"]`);
+            if (tr) {
+                tr.dataset.claimed = '1';
+                tr.dataset.mine = '1';
                 
-                // Update the row
-                const caseId = caseIds[0];
-                const tr = qs(`tr[data-id="${caseId}"]`);
-                if (tr) {
-                    tr.dataset.claimed = '1';
-                    tr.dataset.mine = '1';
-                    
-                    // Replace button with badge
-                    const claimBtn = qs(`.claim-btn[data-case-id="${caseId}"]`);
-                    if (claimBtn) {
-                        const statusCell = claimBtn.closest('td');
-                        statusCell.innerHTML = '<span class="badge badge-success">🔒 Mine</span>';
-                    }
-                }
+                // Replace button with badge
+                const statusCell = btn.closest('td');
+                statusCell.innerHTML = '<span class="badge badge-success">🔒 Mine</span>';
             }
+            
+            // Update claims counter
+            loadClaimsCount();
             
         } catch (err) {
             showToast(err.message, 'error');
             if (btn) {
                 btn.disabled = false;
-                btn.textContent = '✓ I Agree - Claim';
+                btn.textContent = 'Claim';
             }
         }
     };
@@ -730,19 +502,6 @@ const DealAnalysis = {
     // Bulk claim
     if (btnClaim) {
         btnClaim.addEventListener('click', async function() {
-            // Check if user has payment method first
-            try {
-                const response = await fetch('/api/v3/payment/status');
-                const data = await response.json();
-                
-                if (!data.can_claim) {
-                    showPaymentRequiredModal();
-                    return;
-                }
-            } catch (err) {
-                console.error('Error checking payment status:', err);
-            }
-            
             const ids = selectedIds();
             const unclaimedIds = ids.filter(id => {
                 const tr = qs(`tr[data-id="${id}"]`);
@@ -754,8 +513,21 @@ const DealAnalysis = {
                 return;
             }
             
-            // Show confirmation modal for bulk claim
-            showClaimConfirmation(unclaimedIds, true);
+            btnClaim.disabled = true;
+            btnClaim.textContent = 'Claiming...';
+            
+            try {
+                const result = await postJSON('/api/v3/cases/claim', { case_ids: unclaimedIds });
+                showToast(result.message);
+                
+                // Reload page to show updated status
+                setTimeout(() => window.location.reload(), 500);
+                
+            } catch (err) {
+                showToast(err.message, 'error');
+                btnClaim.disabled = false;
+                updateClaimButtons();
+            }
         });
     }
     
@@ -795,6 +567,24 @@ const DealAnalysis = {
         });
     }
     
+    // Load claims count
+    async function loadClaimsCount() {
+        try {
+            const res = await fetch('/api/v3/claims/count');
+            if (res.ok) {
+                const data = await res.json();
+                const counter = qs('#claims-counter');
+                if (counter) {
+                    counter.style.display = 'flex';
+                    counter.querySelector('.claims-count').textContent = data.active_claims;
+                    counter.querySelector('.claims-label').textContent = `/ ${data.max_claims} claimed`;
+                }
+            }
+        } catch (e) {
+            console.log('Could not load claims count');
+        }
+    }
+
     // ============================================================
     // EXISTING FUNCTIONALITY
     // ============================================================
@@ -841,6 +631,9 @@ const DealAnalysis = {
             } catch(err){ alert(err.message); }
         });
     }
+    
+    // Initialize
+    loadClaimsCount();
 })();
 
 // Load Deal Scores
@@ -862,7 +655,7 @@ const DealAnalysis = {
                     const analysis = await response.json();
                     if (analysis.score !== undefined) {
                         const scoreClass = DealAnalysis.getScoreClass(analysis.score);
-                        cell.innerHTML = `<span class="deal-score-badge ${scoreClass}">$${analysis.score}</span>`;
+                        cell.innerHTML = `<span class="deal-score-badge ${scoreClass}">${analysis.score}</span>`;
                     }
                 }
             } catch (e) {}

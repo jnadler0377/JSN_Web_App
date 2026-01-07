@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Analytics Dashboard - JSN Holdings{% endblock %}
+{% block title %}My Analytics - JSN Holdings{% endblock %}
 
 {% block content %}
 <div class="page-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
     <div>
-        <h1 class="page-title">Analytics Dashboard</h1>
-        <p class="page-subtitle">Real-time insights into your foreclosure pipeline.</p>
+        <h1 class="page-title">My Analytics</h1>
+        <p class="page-subtitle">Insights into your claimed cases and deals.</p>
     </div>
     <button class="btn btn-secondary" onclick="location.reload()">↻ Refresh</button>
 </div>
@@ -15,7 +15,7 @@
     <div class="stat-card">
         <div class="stat-icon purple">📊</div>
         <div class="stat-value" id="stat-total-deals">—</div>
-        <div class="stat-label">Total Deals</div>
+        <div class="stat-label">My Deals</div>
     </div>
     <div class="stat-card">
         <div class="stat-icon green">⭐</div>
@@ -30,7 +30,7 @@
     <div class="stat-card">
         <div class="stat-icon orange">📈</div>
         <div class="stat-value" id="stat-avg-score">—</div>
-        <div class="stat-label">Avg Score</div>
+        <div class="stat-label">Avg Price</div>
     </div>
 </div>
 
@@ -39,7 +39,7 @@
     <div class="stat-card">
         <div class="stat-icon purple">📁</div>
         <div class="stat-value">{{ metrics.total_cases | default(0) }}</div>
-        <div class="stat-label">Total Cases</div>
+        <div class="stat-label">My Cases</div>
         <div class="stat-change positive">+{{ metrics.new_cases_30d | default(0) }} this month</div>
     </div>
     <div class="stat-card">
@@ -67,39 +67,39 @@
         <div class="stat-change">Liens exceed offer</div>
     </div>
     <div class="stat-card">
-        <div class="stat-icon purple">🏠</div>
-        <div class="stat-value">{{ metrics.owner_occupied_count | default(0) }}</div>
-        <div class="stat-label">Owner Occupied</div>
-        <div class="stat-change positive">{{ metrics.high_equity_count | default(0) }} high equity</div>
+        <div class="stat-icon purple">💎</div>
+        <div class="stat-value">{{ metrics.high_equity_count | default(0) }}</div>
+        <div class="stat-label">High Equity</div>
+        <div class="stat-change positive">40%+ equity</div>
     </div>
 </div>
 
 <!-- Charts Section -->
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px;">
     <div class="card">
-        <div class="card-header"><h3 class="card-title">Deal Score Distribution</h3></div>
+        <div class="card-header"><h3 class="card-title">My Price Distribution</h3></div>
         <div class="card-body">
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: center;">
                 <div style="height: 200px;"><canvas id="scoreDistributionChart"></canvas></div>
                 <div style="display: flex; flex-direction: column; gap: 12px;">
                     <div style="display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: var(--success-light); border-radius: 8px;">
                         <span style="width: 12px; height: 12px; border-radius: 50%; background: var(--success);"></span>
-                        <span style="flex: 1; font-size: 14px;">Excellent (80-100)</span>
+                        <span style="flex: 1; font-size: 14px;">Premium ($80-$100)</span>
                         <span style="font-weight: 700; color: var(--success);" id="legend-excellent">0</span>
                     </div>
                     <div style="display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: var(--info-light); border-radius: 8px;">
                         <span style="width: 12px; height: 12px; border-radius: 50%; background: var(--info);"></span>
-                        <span style="flex: 1; font-size: 14px;">Good (60-79)</span>
+                        <span style="flex: 1; font-size: 14px;">High Value ($60-$79)</span>
                         <span style="font-weight: 700; color: var(--info);" id="legend-good">0</span>
                     </div>
                     <div style="display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: var(--warning-light); border-radius: 8px;">
                         <span style="width: 12px; height: 12px; border-radius: 50%; background: var(--warning);"></span>
-                        <span style="flex: 1; font-size: 14px;">Fair (40-59)</span>
+                        <span style="flex: 1; font-size: 14px;">Standard ($40-$59)</span>
                         <span style="font-weight: 700; color: #b45309;" id="legend-fair">0</span>
                     </div>
                     <div style="display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: var(--danger-light); border-radius: 8px;">
                         <span style="width: 12px; height: 12px; border-radius: 50%; background: var(--danger);"></span>
-                        <span style="flex: 1; font-size: 14px;">Poor (0-39)</span>
+                        <span style="flex: 1; font-size: 14px;">Low Quality ($1-$39)</span>
                         <span style="font-weight: 700; color: var(--danger);" id="legend-poor">0</span>
                     </div>
                 </div>
@@ -107,15 +107,15 @@
         </div>
     </div>
     <div class="card">
-        <div class="card-header"><h3 class="card-title">Pipeline Value by Status</h3></div>
+        <div class="card-header"><h3 class="card-title">My Pipeline Value</h3></div>
         <div class="card-body"><div style="height: 200px;"><canvas id="pipelineChart"></canvas></div></div>
     </div>
 </div>
 
-<!-- Conversion Funnel -->
-{% if funnel %}
+<!-- Conversion Funnel - Hidden until user has status tracking -->
+{% if funnel and funnel.contacted > 0 %}
 <div class="card" style="margin-bottom: 24px;">
-    <div class="card-header"><h3 class="card-title">Deal Pipeline Funnel</h3></div>
+    <div class="card-header"><h3 class="card-title">My Deal Pipeline</h3></div>
     <div class="card-body">
         <div style="display: flex; gap: 8px; align-items: center;">
             <div style="flex: 1; text-align: center; padding: 20px; background: var(--bg-alt); border-radius: 8px;">
@@ -153,12 +153,12 @@
 <!-- Top Deals -->
 <div class="card" style="margin-bottom: 24px;">
     <div class="card-header">
-        <h3 class="card-title">🔥 Top Scoring Deals</h3>
-        <a href="/cases" class="btn btn-secondary btn-sm">View All</a>
+        <h3 class="card-title">🔥 My Top Deals</h3>
+        <a href="/cases?claim_filter=mine" class="btn btn-secondary btn-sm">View All My Cases</a>
     </div>
     <div class="card-body" id="top-deals-container">
         <div style="display: flex; align-items: center; justify-content: center; gap: 8px; padding: 32px; color: var(--text-muted);">
-            <div class="spinner"></div><span>Loading top deals...</span>
+            <div class="spinner"></div><span>Loading your top deals...</span>
         </div>
     </div>
 </div>
@@ -183,7 +183,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             const total = distData.total_analyzed || 0;
             if (total > 0) {
                 const avgScore = Math.round((distData.distribution.excellent * 90 + distData.distribution.good * 70 + distData.distribution.fair * 50 + distData.distribution.poor * 20) / total);
-                document.getElementById('stat-avg-score').textContent = avgScore;
+                document.getElementById('stat-avg-score').textContent = '$' + avgScore;
             }
             const ctx = document.getElementById('scoreDistributionChart');
             if (ctx) {
@@ -201,7 +201,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             const deals = data.top_deals || [];
             
             if (deals && deals.length > 0) {
-                let html = '<table class="table" style="margin:0;"><thead><tr><th>Case #</th><th>Score</th><th>Max Offer</th><th>Est. Profit</th><th>ROI</th></tr></thead><tbody>';
+                let html = '<table class="table" style="margin:0;"><thead><tr><th>Case #</th><th>Price</th><th>Max Offer</th><th>Est. Profit</th><th>ROI</th></tr></thead><tbody>';
                 
                 deals.forEach(function(d) {
                     const caseNum = d.case_number || '—';
@@ -216,7 +216,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                     
                     html += '<tr onclick="window.location.href=\'/cases/' + caseId + '\'" style="cursor:pointer;">';
                     html += '<td><strong>' + caseNum + '</strong></td>';
-                    html += '<td><span class="deal-score-badge ' + scoreClass + '">' + score + '</span></td>';
+                    html += '<td><span class="deal-score-badge ' + scoreClass + '">$' + score + '</span></td>';
                     html += '<td>$' + Number(maxOffer).toLocaleString(undefined, {maximumFractionDigits: 0}) + '</td>';
                     html += '<td style="color:' + profitColor + ';font-weight:600;">$' + Number(profit).toLocaleString(undefined, {maximumFractionDigits: 0}) + '</td>';
                     html += '<td>' + Number(roi).toFixed(0) + '%</td>';
@@ -226,7 +226,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 html += '</tbody></table>';
                 container.innerHTML = html;
             } else {
-                container.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);">No deals analyzed yet. Set ARV on cases to see them here.</div>';
+                container.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);">No claimed cases with ARV set yet. Claim cases and set their ARV to see analytics.</div>';
             }
         } else {
             container.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);">Unable to load deals</div>';

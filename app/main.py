@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+# ---- Load environment variables from .env file ----
+from dotenv import load_dotenv
+load_dotenv()
+
 # ---- Windows event loop fix for asyncio subprocess ----
 import sys as _sys
 import asyncio as _asyncio
@@ -117,8 +121,19 @@ from app.routes.document_routes import router as document_router, init_document_
 from app.routes.analytics_routes import router as analytics_router, init_templates as init_analytics_templates
 from tools.import_pasco_csv import main as import_pasco_csv_main
 
+# V3: Claim routes and services
+from app.routes.claim_routes import router as claim_router
+from app.routes.billing_routes import router as billing_router
+from app.routes.webhook_routes import router as webhook_router
+from app.routes.task_routes import router as task_router, init_templates as init_task_templates
+from app.routes.case_routes import router as case_router, init_case_routes
+from app.routes.admin_v3_routes import router as admin_v3_router, init_admin_v3_templates
+from app.routes.payment_routes import router as payment_router, init_payment_templates
+from app.services.permission_service import can_view_sensitive, get_case_visibility
+from app.services.claim_service import get_claim_for_case, get_user_claim_count
+
 from .database import Base, engine, SessionLocal
-from .models import Case, Defendant, Docket, Note
+from .models import Case, Defendant, Docket, Note, CaseClaim, Invoice, InvoiceLine
 from .utils import ensure_case_folder, compute_offer_70, compute_offer_80
 from .schemas import OutstandingLien, OutstandingLiensUpdate
 from app.services.progress_bus import shutdown_progress_bus
@@ -340,6 +355,13 @@ app.include_router(report_router)
 app.include_router(notification_router)
 app.include_router(document_router)
 app.include_router(analytics_router)
+app.include_router(claim_router)  # V3: Case claiming routes
+app.include_router(billing_router)  # V3: Billing routes
+app.include_router(payment_router)  # V3: Payment method management
+app.include_router(task_router)
+app.include_router(case_router)  # Case management routes
+app.include_router(webhook_router)  # V3 Phase 5: Stripe webhooks
+app.include_router(admin_v3_router)  # V3 Phase 6: Admin billing/claims
 
 # Rest of your app setup continues...
 logger = logging.getLogger("pascowebapp")
@@ -358,7 +380,31 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 init_admin_templates(templates)
 init_report_templates(templates)
 init_report_upload_root(UPLOAD_ROOT)
+init_task_templates(templates)
+init_case_routes(templates, UPLOAD_ROOT)  # Case routes
 init_analytics_templates(templates)
+init_admin_v3_templates(templates)  # V3 Phase 6
+init_payment_templates(templates)  # V3: Payment method management
+
+# V3 Phase 5: Initialize Stripe if configured
+try:
+    import os
+    from app.services.stripe_service import init_stripe
+    
+    # Try settings first, then fall back to environment variable
+    stripe_key = getattr(settings, 'stripe_secret_key', None) or os.getenv('STRIPE_SECRET_KEY')
+    
+    if stripe_key:
+        if init_stripe(stripe_key):
+            logger.info("Stripe initialized successfully")
+        else:
+            logger.warning("Stripe initialization returned False")
+    else:
+        logger.info("Stripe not configured (no STRIPE_SECRET_KEY)")
+except ImportError as e:
+    logger.warning(f"Stripe service not available: {e}")
+except Exception as e:
+    logger.warning(f"Failed to initialize Stripe: {e}")
 
 # Initialize document routes with dependencies
 try:
@@ -722,6 +768,112 @@ def ensure_sqlite_columns():
                 conn.exec_driver_sql(
                     "ALTER TABLE cases ADD COLUMN property_overrides TEXT DEFAULT '{}'"
                 )
+            # V3: Add assigned_at column for claim tracking
+            if "assigned_at" not in cols:
+                conn.exec_driver_sql(
+                    "ALTER TABLE cases ADD COLUMN assigned_at DATETIME NULL"
+                )
+        
+        # V3: Create case_claims table if not exists
+        if "case_claims" not in tables:
+            with engine.begin() as conn:
+                conn.exec_driver_sql('''
+                    CREATE TABLE IF NOT EXISTS case_claims (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        case_id INTEGER NOT NULL,
+                        user_id INTEGER NOT NULL,
+                        claimed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        released_at DATETIME NULL,
+                        score_at_claim INTEGER DEFAULT 0,
+                        price_cents INTEGER DEFAULT 0,
+                        is_active BOOLEAN DEFAULT 1,
+                        FOREIGN KEY (case_id) REFERENCES cases(id) ON DELETE CASCADE,
+                        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                    )
+                ''')
+                conn.exec_driver_sql('CREATE INDEX IF NOT EXISTS idx_claims_case_id ON case_claims(case_id)')
+                conn.exec_driver_sql('CREATE INDEX IF NOT EXISTS idx_claims_user_id ON case_claims(user_id)')
+                conn.exec_driver_sql('CREATE INDEX IF NOT EXISTS idx_claims_active ON case_claims(is_active)')
+                logger.info("V3: Created case_claims table")
+        
+        # V3 Phase 4: Create invoices table if not exists
+        if "invoices" not in tables:
+            with engine.begin() as conn:
+                conn.exec_driver_sql('''
+                    CREATE TABLE IF NOT EXISTS invoices (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER NOT NULL,
+                        invoice_number TEXT UNIQUE NOT NULL,
+                        invoice_date DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        due_date DATETIME NULL,
+                        subtotal_cents INTEGER DEFAULT 0,
+                        tax_cents INTEGER DEFAULT 0,
+                        total_cents INTEGER DEFAULT 0,
+                        status TEXT DEFAULT 'pending',
+                        stripe_invoice_id TEXT NULL,
+                        stripe_payment_intent TEXT NULL,
+                        stripe_hosted_url TEXT NULL,
+                        paid_at DATETIME NULL,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                    )
+                ''')
+                conn.exec_driver_sql('CREATE INDEX IF NOT EXISTS idx_invoices_user_id ON invoices(user_id)')
+                conn.exec_driver_sql('CREATE INDEX IF NOT EXISTS idx_invoices_status ON invoices(status)')
+                conn.exec_driver_sql('CREATE INDEX IF NOT EXISTS idx_invoices_date ON invoices(invoice_date)')
+                logger.info("V3: Created invoices table")
+        
+        # V3 Phase 4: Create invoice_lines table if not exists
+        if "invoice_lines" not in tables:
+            with engine.begin() as conn:
+                conn.exec_driver_sql('''
+                    CREATE TABLE IF NOT EXISTS invoice_lines (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        invoice_id INTEGER NOT NULL,
+                        claim_id INTEGER NULL,
+                        case_id INTEGER NULL,
+                        description TEXT NOT NULL,
+                        quantity INTEGER DEFAULT 1,
+                        unit_price_cents INTEGER DEFAULT 0,
+                        amount_cents INTEGER DEFAULT 0,
+                        case_number TEXT NULL,
+                        score_at_invoice INTEGER DEFAULT 0,
+                        service_date DATETIME NULL,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE,
+                        FOREIGN KEY (claim_id) REFERENCES case_claims(id) ON DELETE SET NULL,
+                        FOREIGN KEY (case_id) REFERENCES cases(id) ON DELETE SET NULL
+                    )
+                ''')
+                conn.exec_driver_sql('CREATE INDEX IF NOT EXISTS idx_invoice_lines_invoice ON invoice_lines(invoice_id)')
+                logger.info("V3: Created invoice_lines table")
+        
+        # V3 Phase 5: Create webhook_logs table if not exists
+        if "webhook_logs" not in tables:
+            with engine.begin() as conn:
+                conn.exec_driver_sql('''
+                    CREATE TABLE IF NOT EXISTS webhook_logs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        event_type TEXT NOT NULL,
+                        event_id TEXT NOT NULL,
+                        result TEXT,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+                conn.exec_driver_sql('CREATE INDEX IF NOT EXISTS idx_webhook_logs_type ON webhook_logs(event_type)')
+                conn.exec_driver_sql('CREATE INDEX IF NOT EXISTS idx_webhook_logs_date ON webhook_logs(created_at)')
+                logger.info("V3: Created webhook_logs table")
+        
+        # V3: Add user billing columns if not exists
+        if "users" in tables:
+            user_cols = {c["name"] for c in inspector.get_columns("users")}
+            with engine.begin() as conn:
+                if "stripe_customer_id" not in user_cols:
+                    conn.exec_driver_sql("ALTER TABLE users ADD COLUMN stripe_customer_id TEXT NULL")
+                if "max_claims" not in user_cols:
+                    conn.exec_driver_sql("ALTER TABLE users ADD COLUMN max_claims INTEGER DEFAULT 50")
+                if "is_billing_active" not in user_cols:
+                    conn.exec_driver_sql("ALTER TABLE users ADD COLUMN is_billing_active BOOLEAN DEFAULT 1")
         # Dockets table: add columns for uploaded files if missing
         if "dockets" in tables:
             docket_cols = {c["name"] for c in inspector.get_columns("dockets")}
@@ -861,300 +1013,22 @@ async def user_profile(request: Request):
 # COMPARABLES ANALYSIS (Feature 7)
 # ========================================
 
-@app.post("/cases/{case_id}/fetch-comparables")
-async def fetch_comparables(
-    case_id: int,
-    db: Session = Depends(get_db),
-    user: dict = Depends(get_current_user),
-):
-    """Fetch comparable sales for a case"""
-    if not settings.enable_comparables:
-        raise HTTPException(status_code=400, detail="Comparables feature not enabled")
-    
-    # Load case
-    case = db.get(Case, case_id) if hasattr(db, "get") else db.query(Case).get(case_id)
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
-    
-    # Get property data for address and details
-    from app.services.skiptrace_service import (
-        get_case_address_components,
-        load_property_for_case,
-    )
-    
-    street, city, state, postal = get_case_address_components(case)
-    property_payload = load_property_for_case(case_id)
-    
-    # Extract lat/lon and sqft if available
-    lat = lon = sqft = beds = baths = None
-    if property_payload:
-        props = (property_payload.get("results") or {}).get("properties") or []
-        if props:
-            prop = props[0]
-            addr = prop.get("address") or {}
-            building = prop.get("building") or {}
-            
-            lat = addr.get("latitude")
-            lon = addr.get("longitude")
-            sqft = building.get("livingAreaSqft")
-            beds = building.get("bedrooms")
-            baths = building.get("totalBathrooms")
-    
-    # Fetch comparables
-    try:
-        result = fetch_and_save_comparables(
-            case_id=case_id,
-            case_data={
-                "street": street,
-                "city": city,
-                "state": state,
-                "postal_code": postal,
-                "lat": lat,
-                "lon": lon,
-                "sqft": sqft,
-                "beds": beds,
-                "baths": baths,
-            }
-        )
-        
-        return {"success": True, "data": result}
-    
-    except Exception as exc:
-        logger.error(f"Failed to fetch comparables for case {case_id}: {exc}")
-        raise HTTPException(status_code=500, detail=str(exc))
 
 
-@app.get("/cases/{case_id}/comparables", response_class=HTMLResponse)
-def view_comparables(
-    request: Request,
-    case_id: int,
-    db: Session = Depends(get_db),
-    user: dict = Depends(get_current_user),
-):
-    """View comparables page for a case"""
-    case = db.get(Case, case_id) if hasattr(db, "get") else db.query(Case).get(case_id)
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
-    
-    comparables = load_comparables_from_db(case_id)
-    
-    # Calculate suggested ARV if comparables exist
-    suggested_arv = low_est = high_est = None
-    if comparables:
-        # Get subject property details
-        from app.services.skiptrace_service import load_property_for_case
-        property_payload = load_property_for_case(case_id)
-        
-        sqft = beds = baths = None
-        if property_payload:
-            props = (property_payload.get("results") or {}).get("properties") or []
-            if props:
-                building = props[0].get("building") or {}
-                sqft = building.get("livingAreaSqft")
-                beds = building.get("bedrooms")
-                baths = building.get("totalBathrooms")
-        
-        suggested_arv, low_est, high_est = calculate_suggested_arv(
-            comparables, sqft, beds, baths
-        )
-    
-    return templates.TemplateResponse(
-        "cases/comparables.html",
-        {
-            "request": request,
-            "user": user,
-            "case": case,
-            "comparables": comparables,
-            "suggested_arv": suggested_arv,
-            "low_estimate": low_est,
-            "high_estimate": high_est,
-        }
-    )
 
 
 # ========================================
 # DOCUMENT OCR (Feature 11)
 # ========================================
 
-@app.post("/cases/{case_id}/documents/{doc_type}/ocr")
-async def process_document_ocr_endpoint(
-    case_id: int,
-    doc_type: str,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
-    user: dict = Depends(get_current_user),
-):
-    """Trigger OCR processing for a document"""
-    if not settings.enable_ocr:
-        raise HTTPException(status_code=400, detail="OCR feature not enabled")
-    
-    case = db.get(Case, case_id) if hasattr(db, "get") else db.query(Case).get(case_id)
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
-    
-    # Get document path
-    doc_map = {
-        "verified": "verified_complaint_path",
-        "mortgage": "mortgage_path",
-        "current_deed": "current_deed_path",
-        "previous_deed": "previous_deed_path",
-    }
-    
-    attr_name = doc_map.get(doc_type)
-    if not attr_name:
-        raise HTTPException(status_code=400, detail="Invalid document type")
-    
-    doc_path = getattr(case, attr_name, None)
-    if not doc_path:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    full_path = UPLOAD_ROOT / doc_path
-    if not full_path.exists():
-        raise HTTPException(status_code=404, detail="Document file not found")
-    
-    # Check if Celery is available for background processing
-    if settings.is_celery_enabled:
-        from app.celery_app import process_document_ocr
-        task = process_document_ocr.delay(case_id, str(full_path), doc_type)
-        return {"success": True, "task_id": task.id, "status": "processing"}
-    else:
-        # Process synchronously
-        result = extract_document_data(str(full_path), doc_type)
-        populated = auto_populate_case_from_ocr(case_id, result)
-        
-        return {
-            "success": True,
-            "extracted_fields": len(result.get("structured_data", {})),
-            "auto_populated": populated,
-            "data": result["structured_data"],
-        }
 
 
 # ========================================
 # BULK OPERATIONS
 # ========================================
 
-@app.post("/cases/bulk/skip-trace")
-async def bulk_skip_trace_endpoint(
-    background_tasks: BackgroundTasks,
-    ids: List[int] = Form(default=[]),
-    user: dict = Depends(get_current_user),
-):
-    """Bulk skip trace multiple cases"""
-    if not ids:
-        return RedirectResponse(url="/cases", status_code=303)
-    
-    # Check if Celery is available
-    if settings.is_celery_enabled:
-        from app.celery_app import bulk_skip_trace
-        task = bulk_skip_trace.delay(ids)
-        return RedirectResponse(
-            url=f"/tasks/{task.id}",
-            status_code=303
-        )
-    else:
-        # Fallback: process in background task (limited)
-        job_id = uuid.uuid4().hex
-        
-        async def run_bulk_skip():
-            from app.services.skiptrace_service import (
-                get_case_address_components,
-                batchdata_skip_trace,
-                save_skiptrace_row,
-            )
-            db = SessionLocal()
-            try:
-                for case_id in ids:
-                    try:
-                        case = db.get(Case, case_id) if hasattr(db, "get") else db.query(Case).get(case_id)
-                        if not case:
-                            continue
-                        
-                        street, city, state, postal = get_case_address_components(case)
-                        skip_data = batchdata_skip_trace(street, city, state, postal)
-                        save_skiptrace_row(case.id, skip_data)
-                        
-                    except Exception as exc:
-                        logger.error(f"Bulk skip trace failed for case {case_id}: {exc}")
-            finally:
-                db.close()
-        
-        background_tasks.add_task(run_bulk_skip)
-        return RedirectResponse(url="/cases", status_code=303)
 
 
-@app.post("/cases/bulk/property-lookup")
-async def bulk_property_lookup_endpoint(
-    background_tasks: BackgroundTasks,
-    ids: List[int] = Form(default=[]),
-    user: dict = Depends(get_current_user),
-):
-    """Bulk property lookup for multiple cases"""
-    if not ids:
-        return RedirectResponse(url="/cases", status_code=303)
-    
-    if settings.is_celery_enabled:
-        from app.celery_app import bulk_property_lookup
-        task = bulk_property_lookup.delay(ids)
-        return RedirectResponse(url=f"/tasks/{task.id}", status_code=303)
-    else:
-        # Process in background
-        job_id = uuid.uuid4().hex
-        
-        async def run_bulk_lookup():
-            from app.services.skiptrace_service import (
-                get_case_address_components,
-                batchdata_property_lookup_all_attributes,
-                save_property_for_case,
-            )
-            db = SessionLocal()
-            try:
-                for case_id in ids:
-                    try:
-                        case = db.get(Case, case_id) if hasattr(db, "get") else db.query(Case).get(case_id)
-                        if not case:
-                            continue
-                        
-                        street, city, state, postal = get_case_address_components(case)
-                        prop_data = batchdata_property_lookup_all_attributes(street, city, state, postal)
-                        save_property_for_case(case.id, prop_data)
-                        
-                    except Exception as exc:
-                        logger.error(f"Bulk property lookup failed for case {case_id}: {exc}")
-            finally:
-                db.close()
-        
-        background_tasks.add_task(run_bulk_lookup)
-        return RedirectResponse(url="/cases", status_code=303)
-
-
-# ========================================
-# TASK STATUS (for Celery)
-# ========================================
-
-@app.get("/tasks/{task_id}", response_class=HTMLResponse)
-def task_status(request: Request, task_id: str):
-    """Check status of a background task"""
-    if not settings.is_celery_enabled:
-        return templates.TemplateResponse(
-            "task_status.html",
-            {"request": request, "error": "Background tasks not enabled"}
-        )
-    
-    from app.celery_app import celery_app
-    from celery.result import AsyncResult
-    
-    task = AsyncResult(task_id, app=celery_app)
-    
-    return templates.TemplateResponse(
-        "task_status.html",
-        {
-            "request": request,
-            "task_id": task_id,
-            "status": task.state,
-            "result": task.result if task.ready() else None,
-        }
-    )
 
 
 # ========================================
@@ -1201,6 +1075,83 @@ def admin_create_user(
             {"request": request, "error": str(exc)},
             status_code=400,
         )
+
+
+@app.post("/admin/users/update")
+def admin_update_user(
+    request: Request,
+    user_id: int = Form(...),
+    email: str = Form(...),
+    full_name: str = Form(...),
+    password: str = Form(None),
+    role: str = Form(...),
+    is_active: str = Form(None),
+    user: dict = Depends(require_role(["admin"])),
+):
+    """Admin: Update user"""
+    try:
+        with engine.connect() as conn:
+            if password:
+                hashed = get_password_hash(password)
+                conn.execute(
+                    text("""
+                        UPDATE users 
+                        SET email = :email, full_name = :full_name, password_hash = :password,
+                            role = :role, is_active = :is_active
+                        WHERE id = :user_id
+                    """),
+                    {
+                        "user_id": user_id,
+                        "email": email,
+                        "full_name": full_name,
+                        "password": hashed,
+                        "role": role,
+                        "is_active": is_active == "1",
+                    }
+                )
+            else:
+                conn.execute(
+                    text("""
+                        UPDATE users 
+                        SET email = :email, full_name = :full_name, role = :role, is_active = :is_active
+                        WHERE id = :user_id
+                    """),
+                    {
+                        "user_id": user_id,
+                        "email": email,
+                        "full_name": full_name,
+                        "role": role,
+                        "is_active": is_active == "1",
+                    }
+                )
+            conn.commit()
+        return RedirectResponse(url="/admin/users", status_code=303)
+    except Exception as exc:
+        return templates.TemplateResponse(
+            "admin/users.html",
+            {"request": request, "error": str(exc)},
+            status_code=400,
+        )
+
+
+@app.post("/admin/users/toggle")
+def admin_toggle_user(
+    request: Request,
+    user_id: int = Form(...),
+    is_active: str = Form(...),
+    user: dict = Depends(require_role(["admin"])),
+):
+    """Admin: Toggle user active status"""
+    try:
+        with engine.connect() as conn:
+            conn.execute(
+                text("UPDATE users SET is_active = :is_active WHERE id = :user_id"),
+                {"user_id": user_id, "is_active": is_active == "1"}
+            )
+            conn.commit()
+        return RedirectResponse(url="/admin/users", status_code=303)
+    except Exception as exc:
+        return RedirectResponse(url="/admin/users", status_code=303)
 
 
 # ========================================
@@ -1496,989 +1447,139 @@ def home():
     return RedirectResponse(url="/cases", status_code=303)
 
 
-@app.get("/cases/new", response_class=HTMLResponse)
-def new_case_form(request: Request):
-    return templates.TemplateResponse("cases_new.html", {"request": request, "error": None, "current_user": get_current_user(request)})
-
-@app.get("/update_cases/status")
-async def get_update_cases_status():
-    """
-    Returns the last UpdateCases job status:
-      {
-        "last_run": "2025-12-10T03:00:00",
-        "success": true/false/null,
-        "since_days": 1,
-        "message": "Import complete. added=..., updated=..., skipped=..."
-      }
-    """
-    return LAST_UPDATE_STATUS
-
-@app.post("/cases/create")
-def create_case(
-    request: Request,
-    case_number: str = Form(...),
-    filing_date: Optional[str] = Form(None),   # "YYYY-MM-DD" or blank
-    style: Optional[str] = Form(None),
-    parcel_id: Optional[str] = Form(None),
-    address_override: Optional[str] = Form(None),
-    arv: Optional[str] = Form(None),
-    rehab: Optional[str] = Form(None),
-    rehab_condition: Optional[str] = Form(None),
-    closing_costs: Optional[str] = Form(None),
-    defendants_csv: Optional[str] = Form(None),
-    db: Session = Depends(get_db),
-):
-    # helpers
-    def _num(x: Optional[str]) -> Optional[float]:
-        if x is None:
-            return None
-        s = x.strip()
-        if not s:
-            return None
-        try:
-            return float(s.replace(",", ""))
-        except ValueError:
-            return None
-
-    cn = (case_number or "").strip()
-    if not cn:
-        return templates.TemplateResponse("cases_new.html", {"request": request, "error": "Case # is required.", "current_user": get_current_user(request)})
-
-    # Duplicate check
-    exists = db.query(Case).filter(Case.case_number == cn).one_or_none()
-    if exists:
-        return templates.TemplateResponse("cases_new.html", {"request": request, "error": f"Case {cn} already exists (ID {exists.id}).", "current_user": get_current_user(request)})
-
-    # Create case
-    case = Case(case_number=cn)
-    if filing_date:
-        case.filing_datetime = filing_date.strip()
-    if style:
-        case.style = style.strip()
-    if parcel_id:
-        case.parcel_id = parcel_id.strip()
-    if address_override:
-        case.address_override = address_override.strip()
-
-    # only set if provided
-    v_arv = _num(arv)
-    v_rehab = _num(rehab)
-    v_cc = _num(closing_costs)
-    if v_arv is not None:
-        case.arv = v_arv
-    if v_rehab is not None:
-        case.rehab = v_rehab
-    if rehab_condition:
-        case.rehab_condition = rehab_condition.strip()
-    if v_cc is not None:
-        case.closing_costs = v_cc
-
-    db.add(case)
-    db.flush()
-
-    if defendants_csv:
-        raw = defendants_csv.replace("\r", "\n")
-        parts = [p.strip() for chunk in raw.split("\n") for p in chunk.split(",")]
-        seen = set()
-        for name in parts:
-            if name and name not in seen:
-                seen.add(name)
-                db.add(Defendant(case_id=case.id, name=name))
-
-    db.commit()
-    return RedirectResponse(url=f"/cases/{case.id}", status_code=303)
-
-@app.post("/cases/{case_id}/update", response_class=HTMLResponse)
-def update_case_fields(
-    request: Request,
-    case_id: int,
-    parcel_id: Optional[str] = Form(None),
-    address_override: Optional[str] = Form(None),
-    arv: Optional[str] = Form(None),
-    rehab: Optional[str] = Form(None),
-    rehab_condition: Optional[str] = Form(None),
-    closing_costs: Optional[str] = Form(None),
-    db: Session = Depends(get_db),
-):
-    # Load case
-    getter = getattr(db, "get", None)
-    if callable(getter):
-        case = db.get(Case, case_id)
-    else:
-        case = db.query(Case).get(case_id)  # type: ignore[call-arg]
-
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
-
-    # Helper to parse numbers (same logic as in create_case)
-    def _num(x: Optional[str]) -> Optional[float]:
-        if x is None:
-            return None
-        s = x.strip()
-        if not s:
-            return None
-        try:
-            return float(s.replace(",", ""))
-        except ValueError:
-            return None
-
-    # Text fields
-    if parcel_id:
-        case.parcel_id = parcel_id.strip()
-    if address_override:
-        case.address_override = address_override.strip()
-
-    # Numbers (only set if provided)
-    v_arv = _num(arv)
-    v_rehab = _num(rehab)
-    v_cc = _num(closing_costs)
-
-    if v_arv is not None:
-        case.arv = v_arv
-    if v_rehab is not None:
-        case.rehab = v_rehab
-    if rehab_condition:
-        case.rehab_condition = rehab_condition.strip()
-    if v_cc is not None:
-        case.closing_costs = v_cc
-
-    db.add(case)
-    db.commit()
-
-    # Send user back to the case detail page
-    return RedirectResponse(
-        url=request.url_for("case_detail", case_id=case.id),
-        status_code=303,
-    )
-
-@app.get("/cases/{case_id}", response_class=HTMLResponse)
-def case_detail(request: Request, case_id: int, db: Session = Depends(get_db)):
-    """Case detail page with all tabs"""
+# V3: User billing page
+@app.get("/billing", response_class=HTMLResponse)
+def billing_page(request: Request, db: Session = Depends(get_db)):
+    """User billing page showing claims and invoices."""
+    user = get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
     
-    # Get case
-    getter = getattr(db, "get", None)
-    if callable(getter):
-        case = db.get(Case, case_id)
-    else:
-        case = db.query(Case).get(case_id)
+    return templates.TemplateResponse("billing.html", {
+        "request": request,
+        "current_user": user,
+    })
 
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
 
-    # Get notes
-    notes = (
-        db.query(Note)
-        .filter(Note.case_id == case_id)
-        .order_by(Note.id.desc())
-        .all()
-    )
+# V3: Invoice view page
+@app.get("/billing/invoice/{invoice_id}", response_class=HTMLResponse)
+def invoice_view_page(invoice_id: int, request: Request, db: Session = Depends(get_db)):
+    """View a specific invoice."""
+    user = get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
     
-    try:
-        setattr(case, "notes", notes)
-    except Exception:
-        pass
-
-    # Load skip trace data
-    skip_trace = None
-    skip_trace_error = None
-    try:
-        from app.services.skiptrace_service import load_skiptrace_for_case
-        skip_trace = load_skiptrace_for_case(case_id)
-    except Exception as e:
-        logger.error(f"Error loading skip trace for case {case_id}: {e}")
-        skip_trace_error = str(e)
-
-    # Load property data
-    property_payload = None
-    property_data = None
-    has_property_data = False
+    user_id = user.get("id") if isinstance(user, dict) else user.id
+    is_admin = user.get("is_admin", False) if isinstance(user, dict) else getattr(user, "is_admin", False)
     
-    try:
-        from app.services.skiptrace_service import load_property_for_case
-        property_payload = load_property_for_case(case_id)
-        
-        if property_payload:
-            has_property_data = True
-            property_data = parse_property_data(property_payload)
-            
-    except Exception as e:
-        logger.error(f"Error loading property for case {case_id}: {e}")
-
-    # === Financial Calculations ===
-    arv = float(case.arv) if case.arv else 0.0
-    rehab = float(case.rehab) if case.rehab else 0.0
-    rehab_condition = case.rehab_condition or "Good"
+    from app.services.billing_service import get_invoice_details
     
-    rehab_year_built = None
-    rehab_sqft = None
-    rehab_suggested = None
+    invoice_data = get_invoice_details(db, invoice_id)
     
-    if property_payload and property_payload.get("results"):
-        props = property_payload["results"].get("properties", [])
-        if props:
-            p = props[0]
-            building = p.get("building", {})
-            listing = p.get("listing", {})
-            general = p.get("general", {})
-            rehab_year_built = (
-                listing.get("yearBuilt")
-                or building.get("yearBuilt")
-                or general.get("yearBuilt")
-                or p.get("yearBuilt")
-            )
-            rehab_sqft = (
-                listing.get("totalBuildingAreaSquareFeet")
-                or building.get("livingAreaSqft")
-                or general.get("buildingAreaSqft")
-            )
-            
-            if rehab_sqft and rehab_year_built:
-                import datetime
-                current_year = datetime.datetime.now().year
-                age = current_year - rehab_year_built
-                
-                condition_multipliers = {
-                    "Poor": 50,
-                    "Fair": 30,
-                    "Good": 15,
-                    "Excellent": 5,
-                }
-                base_cost = condition_multipliers.get(rehab_condition, 15)
-                
-                if age > 50:
-                    base_cost *= 1.5
-                elif age > 30:
-                    base_cost *= 1.2
-                
-                rehab_suggested = rehab_sqft * base_cost
-
-    closing_input = float(case.closing_costs) if case.closing_costs else None
-    if closing_input:
-        closing = closing_input
-    else:
-        closing = arv * 0.045 if arv > 0 else 0.0
-
-    wholesale_offer = 0.0
-    flip_offer = 0.0
+    if not invoice_data:
+        raise HTTPException(status_code=404, detail="Invoice not found")
     
-    if arv > 0:
-        wholesale_offer = (arv * 0.65) - rehab - closing
-        
-        if arv < 350000:
-            flip_multiplier = 0.80
-        else:
-            flip_multiplier = 0.85
-        
-        flip_offer = (arv * flip_multiplier) - rehab - closing
-
-    import json
-    liens_list = []
-    try:
-        if case.outstanding_liens:
-            liens_data = json.loads(case.outstanding_liens)
-            if isinstance(liens_data, list):
-                liens_list = liens_data
-    except Exception as e:
-        logger.error(f"Error parsing liens for case {case_id}: {e}")
-
-    defendants = []
-    try:
-        defendants = (
-            db.query(Defendant)
-            .filter(Defendant.case_id == case_id)
-            .all()
-        )
-    except Exception as e:
-        logger.error(f"Error loading defendants for case {case_id}: {e}")
-
-    return templates.TemplateResponse(
-        "case_detail.html",
-        {
-            "request": request,
-            "case": case,
-            "current_user": get_current_user(request),
-            "notes": notes,
-            "defendants": defendants,
-            "skip_trace": skip_trace,
-            "skip_trace_error": skip_trace_error,
-            "property_payload": property_payload,
-            "property_data": property_data,
-            "has_property_data": has_property_data,
-            "liens_list": liens_list,
-            "arv": arv,
-            "rehab": rehab,
-            "rehab_condition": rehab_condition,
-            "rehab_year_built": rehab_year_built,
-            "rehab_sqft": rehab_sqft,
-            "rehab_suggested": rehab_suggested,
-            "closing": closing,
-            "closing_input": closing_input,
-            "wholesale_offer": wholesale_offer,
-            "flip_offer": flip_offer,
-            "format_phone": lambda x: format_phone(x) if x else "N/A",
-            "yn_icon": lambda x: "✓" if x else "✗",
-        },
-    )
-
-# NEW: Skip trace endpoint using BatchData
-@app.post("/cases/{case_id}/skip-trace", response_class=HTMLResponse)
-def skip_trace_case(request: Request, case_id: int, db: Session = Depends(get_db)):
-    # Load case
-    getter = getattr(db, "get", None)
-    if callable(getter):
-        case = db.get(Case, case_id)
-    else:
-        case = db.query(Case).get(case_id)  # type: ignore[call-arg]
-
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
-
-    # Notes
-    notes = (
-        db.query(Note)
-        .filter(Note.case_id == case_id)
-        .order_by(Note.id.desc())
-        .all()
-    )
-
-    skip_trace: Optional[dict] = None
-    skip_trace_error: Optional[str] = None
-
-    # 1) Try table-based cache first
-    skip_trace = load_skiptrace_for_case(case_id)
-
-    # 2) If no stored data, call BatchData and persist normalized row
-    if skip_trace is None:
-        street, city, state, postal_code = get_case_address_components(case)
-
-        try:
-            skip_trace = batchdata_skip_trace(street, city, state, postal_code)
-            # Save normalized into case_skiptrace
-            save_skiptrace_row(case.id, skip_trace)
-            # (optional) also keep JSON cache if you still want it:
-            # set_cached_skip_trace(case_id, skip_trace)
-        except HTTPException as exc:
-            detail = exc.detail
-            skip_trace_error = detail if isinstance(detail, str) else str(detail)
-        except Exception as exc:
-            skip_trace_error = f"Unexpected error during skip trace: {exc}"
-
-    offer = compute_offer_70(case.arv or 0, case.rehab or 0, case.closing_costs or 0)
-    rehab_condition = getattr(case, "rehab_condition", "") or "Good"
-    property_overrides = _parse_property_overrides(case)
-    rehab_suggested = _estimate_rehab_from_property(
-        load_property_for_case(case_id), rehab_condition, property_overrides
-    )
-    flip_offer = compute_offer_80(case.arv or 0, case.rehab or 0, case.closing_costs or 0)
-
-    property_payload = load_property_for_case(case_id)
-    property_data = parse_property_data(property_payload) if property_payload else None
-    has_property_data = bool(property_payload and property_payload.get("results"))
-
-    defendants = []
-    try:
-        defendants = (
-            db.query(Defendant)
-            .filter(Defendant.case_id == case_id)
-            .all()
-        )
-    except Exception as e:
-        logger.error(f"Error loading defendants for case {case_id}: {e}")
-
-    return templates.TemplateResponse(
-        "case_detail.html",
-        {
-            "request": request,
-            "case": case,
-            "offer_70": offer,
-            "offer_80": flip_offer,
-            "active_parcel_id": case.parcel_id,
-            "notes": notes,
-            "defendants": defendants,
-            "skip_trace": skip_trace,
-            "skip_trace_error": skip_trace_error,
-            "property_payload": property_payload,
-            "property_data": property_data,
-            "property_error": None,
-            "has_property_data": has_property_data,
-            "rehab_condition": rehab_condition,
-            "rehab_suggested": rehab_suggested,
-            "property_overrides": property_overrides,
-        },
-    )
-
-@app.get("/cases/{case_id}/property-lookup", response_class=HTMLResponse)
-def property_lookup_case_get(request: Request, case_id: int, db: Session = Depends(get_db)):
-    return property_lookup_case(request, case_id, db)
+    # Check access - user can only see their own invoices (unless admin)
+    if not is_admin and invoice_data.get("user", {}).get("id") != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    return templates.TemplateResponse("invoice_view.html", {
+        "request": request,
+        "current_user": user,
+        "invoice": invoice_data,
+    })
 
 
-@app.post("/cases/{case_id}/property-lookup", response_class=HTMLResponse)
-def property_lookup_case(request: Request, case_id: int, db: Session = Depends(get_db)):
-    # Load case
-    getter = getattr(db, "get", None)
-    if callable(getter):
-        case = db.get(Case, case_id)
-    else:
-        case = db.query(Case).get(case_id)  # type: ignore[call-arg]
-
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
-
-    # Notes
-    notes = (
-        db.query(Note)
-        .filter(Note.case_id == case_id)
-        .order_by(Note.id.desc())
-        .all()
-    )
-    try:
-        setattr(case, "notes", notes)
-    except Exception:
-        pass
-
-    # Existing skip trace (unchanged)
-    skip_trace = load_skiptrace_for_case(case_id)
-    skip_trace_error: Optional[str] = None
-
-    # Property lookup
-    property_payload: Optional[dict] = None
-    property_data: Optional[dict] = None
-    property_error: Optional[str] = None
-
-    try:
-        street, city, state, postal_code = get_case_address_components(case)
-        raw_property_data = batchdata_property_lookup_all_attributes(
-            street, city, state, postal_code
-        )
-        save_property_for_case(case.id, raw_property_data)
-        property_payload = normalize_property_payload(raw_property_data)
-        property_data = parse_property_data(property_payload)
-    except HTTPException as exc:
-        detail = exc.detail
-        property_error = detail if isinstance(detail, str) else str(detail)
-        # fall back to any previously saved data
-        property_payload = load_property_for_case(case_id)
-        if property_payload:
-            property_data = parse_property_data(property_payload)
-    except Exception as exc:
-        property_error = f"Unexpected error during property lookup: {exc}"
-        property_payload = load_property_for_case(case_id)
-        if property_payload:
-            property_data = parse_property_data(property_payload)
-
-    offer = compute_offer_70(case.arv or 0, case.rehab or 0, case.closing_costs or 0)
-    rehab_condition = getattr(case, "rehab_condition", "") or "Good"
-    property_overrides = _parse_property_overrides(case)
-    rehab_suggested = _estimate_rehab_from_property(
-        property_data, rehab_condition, property_overrides
-    )
-    flip_offer = compute_offer_80(case.arv or 0, case.rehab or 0, case.closing_costs or 0)
-
-    arv = float(case.arv) if case.arv else 0.0
-    rehab = float(case.rehab) if case.rehab else 0.0
-    closing_input = float(case.closing_costs) if case.closing_costs else None
-    if closing_input:
-        closing = closing_input
-    else:
-        closing = arv * 0.045 if arv > 0 else 0.0
-
-    rehab_year_built = None
-    rehab_sqft = None
-    if property_payload and property_payload.get("results"):
-        props = property_payload["results"].get("properties", [])
-        if props:
-            p = props[0]
-            listing = p.get("listing", {})
-            building = p.get("building", {})
-            general = p.get("general", {})
-            rehab_year_built = (
-                listing.get("yearBuilt")
-                or building.get("yearBuilt")
-                or general.get("yearBuilt")
-                or p.get("yearBuilt")
-            )
-            rehab_sqft = (
-                listing.get("totalBuildingAreaSquareFeet")
-                or building.get("livingAreaSqft")
-                or general.get("buildingAreaSqft")
-            )
-
-    if property_overrides.get("year_built"):
-        rehab_year_built = property_overrides.get("year_built")
-    if property_overrides.get("sqft"):
-        rehab_sqft = property_overrides.get("sqft")
-
-    defendants = []
-    try:
-        defendants = (
-            db.query(Defendant)
-            .filter(Defendant.case_id == case_id)
-            .all()
-        )
-    except Exception as e:
-        logger.error(f"Error loading defendants for case {case_id}: {e}")
-
-    return templates.TemplateResponse(
-        "case_detail.html",
-        {
-            "request": request,
-            "case": case,
-            "offer_70": offer,
-            "offer_80": flip_offer,
-            "active_parcel_id": case.parcel_id,
-            "notes": notes,
-            "defendants": defendants,
-            "skip_trace": skip_trace,
-            "skip_trace_error": skip_trace_error,
-            "property_payload": property_payload,
-            "property_data": property_data,
-            "property_error": property_error,
-            "has_property_data": bool(property_payload and property_payload.get("results")),
-            "arv": arv,
-            "rehab": rehab,
-            "rehab_condition": rehab_condition,
-            "rehab_year_built": rehab_year_built,
-            "rehab_sqft": rehab_sqft,
-            "rehab_suggested": rehab_suggested,
-            "closing": closing,
-            "closing_input": closing_input,
-            "property_overrides": property_overrides,
-        },
-    )
+# V3: Payment method setup page
+@app.get("/billing/payment-method", response_class=HTMLResponse)
+def payment_method_page(request: Request, db: Session = Depends(get_db)):
+    """Payment method setup page."""
+    user = get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    
+    return templates.TemplateResponse("payment_method.html", {
+        "request": request,
+        "current_user": user,
+    })
 
 
-# ======================================================================
-# SSE progress endpoints + update job orchestration
-# ======================================================================
-@app.get("/update_progress/{job_id}", response_class=HTMLResponse)
-async def update_progress_page(request: Request, job_id: str):
-    html = f"""
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>Updating cases…</title>
-  <style>
-    body {{ font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; }}
-    .wrap {{ max-width: 900px; margin: 24px auto; padding: 0 16px; }}
-    .spinner {{
-      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
-      background: rgba(0,0,0,0.5); color: #fff; z-index: 9999; font-size: 18px;
-    }}
-    .log {{
-      background: #0b0b0b; color: #c9f4ff; padding: 16px; border-radius: 12px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-      white-space: pre-wrap; line-height: 1.35; max-height: 60vh; overflow: auto;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-    }}
-    .muted {{ color: #9aa7b1; font-size: 12px; margin-top: 8px; }}
-    .hide {{ display:none; }}
-    .pill {{ display:inline-block; padding:4px 10px; border-radius: 999px; background:#eef2ff; color:#3730a3; font-size:12px; }}
-  </style>
-</head>
-<body>
-  <div id="spinner" class="spinner">Updating cases… Please don’t navigate away.</div>
-  <div class="wrap">
-    <h1>Update in progress <span class="pill">live log</span></h1>
-    <div id="log" class="log"></div>
-    <div id="hint" class="muted">This log will auto-scroll. You’ll be redirected when finished.</div>
-  </div>
-
-<script>
-  const logEl = document.getElementById('log');
-  const spinner = document.getElementById('spinner');
-  const es = new EventSource('/events/{job_id}');
-  function appendLine(s) {{
-    logEl.textContent += s + '\\n';
-    logEl.scrollTop = logEl.scrollHeight;
-  }}
-  es.onmessage = (e) => {{
-    const t = e.data || '';
-    if (t.startsWith('[done]')) {{
-      spinner.classList.add('hide');
-      es.close();
-      setTimeout(() => window.location.href = '/cases', 10000);
-    }} else {{
-      if (t.trim().length) {{
-        appendLine(t);
-        spinner.classList.add('hide');
-      }}
-    }}
-  }};
-  es.onerror = () => {{
-    appendLine('[connection error] retrying…');
-  }};
-</script>
-</body>
-</html>
-"""
-    return HTMLResponse(content=html)
+# V3: Admin billing dashboard
+@app.get("/admin/billing", response_class=HTMLResponse)
+def admin_billing_dashboard(request: Request, db: Session = Depends(get_db)):
+    """Admin billing dashboard page."""
+    user = get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    
+    is_admin = user.get("is_admin", False) if isinstance(user, dict) else getattr(user, "is_admin", False)
+    if not is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    return templates.TemplateResponse("admin_billing.html", {
+        "request": request,
+        "current_user": user,
+    })
 
 
-@app.get("/events/{job_id}")
-async def events(job_id: str):
-    async def event_generator():
-        # initial hello to open the stream promptly
-        yield ": connected\n\n"
-        while True:
-            try:
-                async for line in progress_bus.stream(job_id):
-                    yield f"data: {line}\n\n"
-            except Exception:
-                # brief heartbeat to keep connection alive
-                yield ": heartbeat\n\n"
-                await asyncio.sleep(5)
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+# V3: Admin claims management
+@app.get("/admin/claims", response_class=HTMLResponse)
+def admin_claims_management(request: Request, db: Session = Depends(get_db)):
+    """Admin claims management page."""
+    user = get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    
+    is_admin = user.get("is_admin", False) if isinstance(user, dict) else getattr(user, "is_admin", False)
+    if not is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    return templates.TemplateResponse("admin_claims.html", {
+        "request": request,
+        "current_user": user,
+    })
 
 
-@app.get("/import", response_class=HTMLResponse)
-def update_case_list_page(request: Request):
-    # Renders the form with the "Days to scrape" selector that posts to /update_cases
-    return templates.TemplateResponse("import.html", {"request": request, "current_user": get_current_user(request)})
-
-
-@app.post("/update_cases")
-async def update_cases(
-    request: Request,
-    since_days: int = Form(7),
-    run_pasco: Optional[int] = Form(None),
-    run_pinellas: Optional[int] = Form(None),
-):
-    """
-    Starts an async job that:
-      1) Runs the foreclosure scraper with --since-days
-      2) Imports the resulting CSV with upsert-by-case_number (no dupes)
-    Immediately redirects to a live log page.
-    """
-    job_id = uuid.uuid4().hex
-
-    # prime the log so the progress page shows something immediately
-    await progress_bus.publish(job_id, f"Queued job {job_id}…")
-
-    # delegate the heavy lifting to the service
-    asyncio.create_task(
-        run_update_cases_job(
-            job_id,
-            since_days,
-            run_pasco=bool(run_pasco),
-            run_pinellas=bool(run_pinellas),
-        )
-    )
-
-    return RedirectResponse(
-        url=request.url_for("update_progress_page", job_id=job_id),
-        status_code=303,
-    )
+# V3: Admin reports (redirects to billing for now)
+@app.get("/admin/reports", response_class=HTMLResponse)
+def admin_reports_page(request: Request):
+    """Admin reports page - redirects to billing dashboard."""
+    return RedirectResponse(url="/admin/billing", status_code=303)
 
 
 
-async def _update_cases_job(job_id: str, since_days: int):
-    try:
-        await progress_bus.publish(job_id, f"Starting update job {job_id} (since_days={since_days})")
 
-        # 1) Run the scraper to produce CSV
-        scraper_script = _find_scraper_script()
-        tmpdir = tempfile.mkdtemp(prefix="pasco_update_")
-        csv_out = os.path.join(tmpdir, "pasco_foreclosures.csv")
 
-        cmd = [
-            sys.executable,
-            str(scraper_script),
-            "--since-days", str(max(0, int(since_days))),
-            "--out", csv_out,  # your integrated scraper should accept --out
-        ]
-        await progress_bus.publish(job_id, "Launching scraper: " + " ".join(cmd))
-        rc = await run_command_with_logs(cmd, job_id)
-        if rc != 0 or not os.path.exists(csv_out):
-            await progress_bus.publish(job_id, "[error] Scraper failed or CSV not found.]")
-            await progress_bus.publish(job_id, "[done] exit_code=1")
-            return
 
-        await progress_bus.publish(job_id, "Scraper finished. Importing CSV via tools/import_pasco_csv.py…")
 
-        # 2) Import CSV using the same logic as the CLI tool
-        def _run_import():
-            import_pasco_csv_main(csv_out)
 
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, _run_import)
-
-        await progress_bus.publish(job_id, "Import complete via tools/import_pasco_csv.py")
-        await progress_bus.publish(job_id, "[done] exit_code=0")
-
-    except Exception as e:
-        # Surface the exception in the log and signal completion
-        await progress_bus.publish(job_id, f"[exception] {e}")
-        await progress_bus.publish(job_id, "[done] exit_code=1")
 
 
 # ======================================================================
 # Case document uploads
 # ======================================================================
-@app.post("/cases/{case_id}/upload/verified")
-async def upload_verified(
-    case_id: int, verified_complaint: UploadFile = File(...), db: Session = Depends(get_db)
-):
-    case = db.query(Case).get(case_id)  # type: ignore[call-arg]
-    if not case:
-        return RedirectResponse("/cases", status_code=303)
-
-    folder = ensure_case_folder(str(UPLOAD_ROOT), case.case_number)
-    dest = Path(folder) / "Verified_Complaint.pdf"
-    with open(dest, "wb") as f:
-        f.write(await verified_complaint.read())
-
-    case.verified_complaint_path = dest.relative_to(UPLOAD_ROOT).as_posix()
-    db.commit()
-    return RedirectResponse(f"/cases/{case_id}", status_code=303)
 
 
-@app.post("/cases/{case_id}/upload/value_calc")
-async def upload_value_calc(
-    case_id: int, value_calc: UploadFile = File(...), db: Session = Depends(get_db)
-):
-    case = db.query(Case).get(case_id)  # type: ignore[call-arg]
-    if not case:
-        return RedirectResponse("/cases", status_code=303)
-
-    folder = ensure_case_folder(str(UPLOAD_ROOT), case.case_number)
-    dest = Path(folder) / "Value_Calculation.pdf"
-    with open(dest, "wb") as f:
-        f.write(await value_calc.read())
-
-    case.value_calc_path = dest.relative_to(UPLOAD_ROOT).as_posix()
-    db.commit()
-    return RedirectResponse(f"/cases/{case_id}", status_code=303)
 
 
-@app.post("/cases/{case_id}/upload/mortgage")
-async def upload_mortgage(
-    case_id: int, mortgage: UploadFile = File(...), db: Session = Depends(get_db)
-):
-    case = db.query(Case).get(case_id)  # type: ignore[call-arg]
-    if not case:
-        return RedirectResponse("/cases", status_code=303)
-
-    folder = ensure_case_folder(str(UPLOAD_ROOT), case.case_number)
-    dest = Path(folder) / "Mortgage.pdf"
-    with open(dest, "wb") as f:
-        f.write(await mortgage.read())
-
-    case.mortgage_path = dest.relative_to(UPLOAD_ROOT).as_posix()
-    db.commit()
-    return RedirectResponse(f"/cases/{case_id}", status_code=303)
 
 
-@app.post("/cases/{case_id}/upload/current-deed")
-async def upload_current_deed(
-    case_id: int, current_deed: UploadFile = File(...), db: Session = Depends(get_db)
-):
-    case = db.query(Case).get(case_id)  # type: ignore[call-arg]
-    if not case:
-        return RedirectResponse("/cases", status_code=303)
-
-    folder = ensure_case_folder(str(UPLOAD_ROOT), case.case_number)
-    dest = Path(folder) / "Current_Deed.pdf"
-    with open(dest, "wb") as f:
-        f.write(await current_deed.read())
-
-    case.current_deed_path = dest.relative_to(UPLOAD_ROOT).as_posix()
-    db.commit()
-    return RedirectResponse(f"/cases/{case_id}", status_code=303)
 
 
-@app.post("/cases/{case_id}/upload/previous-deed")
-async def upload_previous_deed(
-    case_id: int, previous_deed: UploadFile = File(...), db: Session = Depends(get_db)
-):
-    case = db.query(Case).get(case_id)  # type: ignore[call-arg]
-    if not case:
-        return RedirectResponse("/cases", status_code=303)
-
-    folder = ensure_case_folder(str(UPLOAD_ROOT), case.case_number)
-    dest = Path(folder) / "Previous_Deed.pdf"
-    with open(dest, "wb") as f:
-        f.write(await previous_deed.read())
-
-    case.previous_deed_path = dest.relative_to(UPLOAD_ROOT).as_posix()
-    db.commit()
-    return RedirectResponse(f"/cases/{case_id}", status_code=303)
-
-@app.post("/cases/{case_id}/documents/upload")
-async def upload_case_document(
-    case_id: int,
-    file: UploadFile = File(...),
-    doc_type: str = Form(...),
-    db: Session = Depends(get_db),
-):
-    """
-    Single upload endpoint. Uses doc_type to decide where to store the file:
-    - verified          -> case.verified_complaint_path
-    - mortgage          -> case.mortgage_path
-    - current_deed      -> case.current_deed_path
-    - previous_deed     -> case.previous_deed_path
-    - value_calc        -> case.value_calc_path
-    - other             -> generic Docket record
-    """
-    # Load case
-    case = db.query(Case).get(case_id)  # type: ignore[call-arg]
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
-
-    # Normalize doc_type
-    dt = (doc_type or "").strip().lower()
-
-    # Make sure we have a filename
-    original_name = file.filename or "document.pdf"
-    safe_name = original_name.replace("/", "_").replace("\\", "_")
-
-    # Folder per case
-    folder = ensure_case_folder(str(UPLOAD_ROOT), case.case_number)
-
-    # Map the dropdown choice to a fixed filename + case field
-    mapping = {
-        "verified":      ("Verified_Complaint.pdf", "verified_complaint_path", "Verified Complaint"),
-        "mortgage":      ("Mortgage.pdf", "mortgage_path", "Mortgage"),
-        "current_deed":  ("Current_Deed.pdf", "current_deed_path", "Current Deed"),
-        "previous_deed": ("Previous_Deed.pdf", "previous_deed_path", "Previous Deed"),
-        "value_calc":    ("Value_Calculation.pdf", "value_calc_path", "Value Calculation"),
-    }
-
-    if dt in mapping:
-        target_name, attr_name, _label = mapping[dt]
-        dest = Path(folder) / target_name
-    else:
-        # "other" or anything unknown: keep the user’s filename
-        dest = Path(folder) / safe_name
-        attr_name = None  # will create a Docket row instead
-
-    # Save file to disk
-    content = await file.read()
-    with open(dest, "wb") as f:
-        f.write(content)
-
-    rel_path = dest.relative_to(UPLOAD_ROOT).as_posix()
-
-    # If it’s a known type, store on the Case model
-    if attr_name:
-        setattr(case, attr_name, rel_path)
-        db.add(case)
-        db.commit()
-    else:
-        # Generic "Other" document -> create a Docket record
-        docket = Docket(
-            case_id=case.id,
-            file_name=safe_name,
-            file_url=f"/uploads/{rel_path}",
-            description=original_name,
-        )
-        db.add(docket)
-        db.commit()
-
-    return RedirectResponse(f"/cases/{case_id}", status_code=303)
 
 
-@app.post("/cases/{case_id}/notes/add")
-def add_note(case_id: int, content: str = Form(...), db: Session = Depends(get_db)):
-    case = db.query(Case).get(case_id)  # type: ignore[call-arg]
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
-    content = (content or "").strip()
-    if not content:
-        return RedirectResponse(url=f"/cases/{case_id}", status_code=303)
-    ts = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-    note = Note(case_id=case_id, content=content, created_at=ts)
-    db.add(note)
-    db.commit()
-    return RedirectResponse(url=f"/cases/{case_id}", status_code=303)
 
 
-@app.post("/cases/{case_id}/property-overrides")
-def update_property_overrides(
-    case_id: int,
-    property_type: Optional[str] = Form(None),
-    year_built: Optional[str] = Form(None),
-    sqft: Optional[str] = Form(None),
-    lot_size: Optional[str] = Form(None),
-    beds: Optional[str] = Form(None),
-    baths: Optional[str] = Form(None),
-    low_range: Optional[str] = Form(None),
-    high_range: Optional[str] = Form(None),
-    estimated_value: Optional[str] = Form(None),
-    assessed_value: Optional[str] = Form(None),
-    annual_taxes: Optional[str] = Form(None),
-    db: Session = Depends(get_db),
-):
-    case = db.query(Case).get(case_id)  # type: ignore[call-arg]
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
-
-    overrides = _parse_property_overrides(case)
-
-    def _set(key: str, val: Optional[str]) -> None:
-        if val is None:
-            return
-        v = val.strip()
-        if v:
-            overrides[key] = v
-        else:
-            overrides.pop(key, None)
-
-    _set("property_type", property_type)
-    _set("year_built", year_built)
-    _set("sqft", sqft)
-    _set("lot_size", lot_size)
-    _set("beds", beds)
-    _set("baths", baths)
-    _set("low_range", low_range)
-    _set("high_range", high_range)
-    _set("estimated_value", estimated_value)
-    _set("assessed_value", assessed_value)
-    _set("annual_taxes", annual_taxes)
-
-    case.property_overrides = json.dumps(overrides)
-    db.add(case)
-    db.commit()
-    return RedirectResponse(url=f"/cases/{case_id}", status_code=303)
 
 
-@app.get("/cases/{case_id}/notes/{note_id}/delete")
-def delete_note(case_id: int, note_id: int, db: Session = Depends(get_db)):
-    note = db.query(Note).filter(Note.id == note_id, Note.case_id == case_id).first()
-    if note:
-        db.delete(note)
-        db.commit()
-    return RedirectResponse(url=f"/cases/{case_id}", status_code=303)
+
 
 
 # ======================================================================
 # NEW: Outstanding Liens API
 # ======================================================================
-@app.get("/cases/{case_id}/liens", response_model=list[OutstandingLien])
-def get_outstanding_liens(case_id: int, db: Session = Depends(get_db)):
-    case = db.query(Case).get(case_id)  # type: ignore[call-arg]
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
-    return case.get_outstanding_liens()
 
 
-@app.post("/cases/{case_id}/liens")
-def save_outstanding_liens(case_id: int, payload: OutstandingLiensUpdate, db: Session = Depends(get_db)):
-    case = db.query(Case).filter(Case.id == case_id).first()
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
-    
-    # Convert liens to JSON string and save to outstanding_liens column
-    import json
-    case.outstanding_liens = json.dumps([l.dict() for l in payload.outstanding_liens])
-    db.commit()
-    
-    # Return the saved liens
-    return json.loads(case.outstanding_liens)
 
 
 # ======================================================================
@@ -2513,856 +1614,13 @@ def _ensure_archived_column():
         logger.warning("Could not ensure 'archived' column: %s", e)
 
 
-@app.get("/cases", response_class=HTMLResponse)
-def cases_list(
-    request: Request,
-    page: int = Query(1),
-    page_size: Optional[int] = Query(None),
-    show_archived: Optional[str] = Query("0"),
-    show_new: Optional[str] = Query("0"),
-    case: str = Query("", alias="case"),
-    tag: str = Query(""),
-    sort_by: str = Query("case_number"),
-    sort_order: str = Query("desc"),
-    db: Session = Depends(get_db),
-):
-    # Handle page_size - default to 10, cap at 100
-    if page_size is None or page_size < 5:
-        page_size = 10
-    if page_size > 100:
-        page_size = 100
-    
-    # Handle show_archived - convert empty string to 0
-    try:
-        show_archived_int = int(show_archived) if show_archived else 0
-    except (ValueError, TypeError):
-        show_archived_int = 0
-    
-    # Handle show_new - convert empty string to 0
-    try:
-        show_new_int = int(show_new) if show_new else 0
-    except (ValueError, TypeError):
-        show_new_int = 0
-    
-    qry = db.query(Case)
-
-    if not show_archived_int:
-        qry = qry.filter(text("(archived IS NULL OR archived = 0)"))
-    
-    # Filter by user permissions
-    user = get_current_user(request)
-    if user and user.get("role") != "admin" and not getattr(user, "is_admin", False):
-        user_id = user.get("id")
-        role = user.get("role", "")
-        
-        if role == "subscriber":
-            # Subscribers ONLY see cases assigned to them
-            qry = qry.filter(text("assigned_to = :uid")).params(uid=user_id)
-        else:
-            # Analysts/Owners see assigned cases + unassigned cases
-            qry = qry.filter(text("(assigned_to = :uid OR assigned_to IS NULL)")).params(uid=user_id)
-
-    # Show new: filter to cases without an address
-    if show_new_int:
-        qry = qry.filter(text("(address IS NULL OR address = '' OR TRIM(address) = '')"))
-        qry = qry.filter(text("(address_override IS NULL OR address_override = '' OR TRIM(address_override) = '')"))
-
-    if case:
-        qry = qry.filter(Case.address.contains(case))
-
-    def _as_float(val: object) -> float:
-        try:
-            if val is None:
-                return 0.0
-            if isinstance(val, (int, float)):
-                return float(val)
-            s = str(val).strip()
-            if not s:
-                return 0.0
-            cleaned = s.replace("$", "").replace(",", "")
-            return float(cleaned)
-        except Exception:
-            return 0.0
-
-    def _sum_liens(raw: object) -> float:
-        try:
-            liens = json.loads(raw) if isinstance(raw, str) else raw
-        except Exception:
-            liens = []
-        total = 0.0
-        if isinstance(liens, list):
-            for item in liens:
-                if not isinstance(item, dict):
-                    continue
-                amt = item.get("amount") or item.get("balance") or item.get("lien_amount")
-                total += _as_float(amt)
-        return round(total, 2)
-
-    tag_map = {
-        "Owner Occupied": "ownerOccupied",
-        "High Equity": "highEquity",
-        "Free & Clear": "freeAndClear",
-        "Absentee Owner": "absenteeOwner",
-        "Pre-foreclosure": "preforeclosure",
-        "Tax Default": "taxDefault",
-        "Vacant": "vacant",
-        "Has HOA": "hasHoa",
-        "Short Sale": "__short_sale__",
-    }
-    if tag == "Short Sale":
-        base_rows = (
-            qry.with_entities(
-                Case.id,
-                Case.arv,
-                Case.rehab,
-                Case.closing_costs,
-                Case.outstanding_liens,
-            )
-            .all()
-        )
-        short_sale_ids = []
-        for cid, arv_v, rehab_v, closing_v, liens_raw in base_rows:
-            liens_total = _sum_liens(liens_raw)
-            wholesale_offer = max(
-                0.0, (_as_float(arv_v) * 0.65) - _as_float(rehab_v) - _as_float(closing_v)
-            )
-            flip_rate = 0.85 if _as_float(arv_v) > 350000 else 0.80
-            flip_offer = max(
-                0.0, (_as_float(arv_v) * flip_rate) - _as_float(rehab_v) - _as_float(closing_v)
-            )
-            if liens_total and (wholesale_offer < liens_total or flip_offer < liens_total):
-                short_sale_ids.append(int(cid))
-        if short_sale_ids:
-            qry = qry.filter(Case.id.in_(short_sale_ids))
-        else:
-            qry = qry.filter(text("1=0"))
-    elif tag and tag in tag_map:
-        key = tag_map[tag]
-        pattern1 = f'%"{key}":true%'
-        pattern2 = f'%"{key}": true%'
-        rows = db.execute(
-            text(
-                "SELECT case_id FROM case_property "
-                "WHERE raw_json LIKE :p1 OR raw_json LIKE :p2"
-            ),
-            {"p1": pattern1, "p2": pattern2},
-        ).fetchall()
-        tag_case_ids = [int(r[0]) for r in rows]
-        if tag_case_ids:
-            qry = qry.filter(Case.id.in_(tag_case_ids))
-        else:
-            qry = qry.filter(text("1=0"))
-    # page_size comes from query param (default 10)
-    # Dynamic ordering based on sort_by and sort_order
-    sort_column = Case.case_number  # Default
-    if sort_by == "case_number":
-        sort_column = Case.case_number
-    elif sort_by == "filing_datetime":
-        sort_column = Case.filing_datetime
-    elif sort_by == "style":
-        sort_column = Case.style
-    elif sort_by == "address":
-        sort_column = Case.address
-    else:
-        sort_column = Case.case_number
-    
-    if sort_order == "asc":
-        qry = qry.order_by(sort_column.asc())
-    else:
-        qry = qry.order_by(sort_column.desc())
-
-    total = qry.count()
-    pages = (total + page_size - 1) // page_size
-    offset = (page - 1) * page_size
-
-    cases = qry.offset(offset).limit(page_size).all()
-    pagination = {"page": page, "pages": pages, "total": total}
-
-    # Badge counts (safe, no schema changes)
-    case_ids = [c.id for c in cases]
-    defendants_count = {}
-    notes_count = {}
-    docs_present = {}
-
-    if case_ids:
-        # Defendants count
-        for cid, cnt in (
-            db.query(Defendant.case_id, func.count(Defendant.id))
-              .filter(Defendant.case_id.in_(case_ids))
-              .group_by(Defendant.case_id)
-              .all()
-        ):
-            defendants_count[int(cid)] = int(cnt)
-
-        # Notes count
-        for cid, cnt in (
-            db.query(Note.case_id, func.count(Note.id))
-              .filter(Note.case_id.in_(case_ids))
-              .group_by(Note.case_id)
-              .all()
-        ):
-            notes_count[int(cid)] = int(cnt)
-
-    # Docs present based on stored paths on Case (Verified Complaint, Mortgage, etc.)
-    for c in cases:
-        docs_present[c.id] = any(
-            bool(getattr(c, attr, "") or "")
-            for attr in [
-                "verified_complaint_path",
-                "value_calc_path",
-                "mortgage_path",
-                "current_deed_path",
-                "previous_deed_path",
-                "appraiser_doc1_path",
-                "appraiser_doc2_path",
-            ]
-        )
-
-    # Quick flags + short sale tags
-    quick_flags: dict[int, list[str]] = {}
-    short_sale: dict[int, bool] = {}
-
-    if case_ids:
-        # Quick flags from BatchData property payload
-        try:
-            placeholders = ",".join([":id" + str(i) for i in range(len(case_ids))])
-            params = {"id" + str(i): case_ids[i] for i in range(len(case_ids))}
-            rows = db.execute(
-                text(
-                    f"SELECT case_id, raw_json FROM case_property WHERE case_id IN ({placeholders})"
-                ),
-                params,
-            ).fetchall()
-            for cid, raw_json in rows:
-                if not raw_json:
-                    continue
-                try:
-                    payload = json.loads(raw_json)
-                    payload = normalize_property_payload(payload)
-                    props = (payload.get("results") or {}).get("properties") or []
-                    if not props:
-                        continue
-                    quick = (
-                        props[0].get("quickLists")
-                        or props[0].get("quickList")
-                        or {}
-                    )
-                except Exception:
-                    continue
-
-                tags: list[str] = []
-                if isinstance(quick, dict):
-                    for key, value in quick.items():
-                        if not value:
-                            continue
-                        label = (
-                            str(key)
-                            .replace("_", " ")
-                            .replace("  ", " ")
-                            .strip()
-                        )
-                        if not label:
-                            continue
-                        # Title-case without mangling acronyms like HOA
-                        parts = []
-                        for part in label.split(" "):
-                            if part.lower() == "hoa":
-                                parts.append("HOA")
-                            else:
-                                parts.append(part[:1].upper() + part[1:])
-                        tags.append(" ".join(parts))
-                elif isinstance(quick, list):
-                    for item in quick:
-                        if isinstance(item, str):
-                            label = item.strip()
-                        elif isinstance(item, dict):
-                            label = (
-                                item.get("name")
-                                or item.get("tag")
-                                or item.get("label")
-                                or ""
-                            ).strip()
-                        else:
-                            label = ""
-                        if label:
-                            tags.append(label)
-                elif isinstance(quick, str):
-                    label = quick.strip()
-                    if label:
-                        tags.append(label)
-                if tags:
-                    quick_flags[int(cid)] = tags
-        except Exception as e:
-            logger.warning("cases_list: could not compute quick_flags: %s", e)
-
-        # Short sale: liens exceed wholesale or flip offer
-        for c in cases:
-            liens_total = _sum_liens(getattr(c, "outstanding_liens", "[]"))
-            wholesale_offer = max(0.0, (_as_float(c.arv) * 0.65) - _as_float(c.rehab) - _as_float(c.closing_costs))
-            flip_rate = 0.85 if _as_float(c.arv) > 350000 else 0.80
-            flip_offer = max(0.0, (_as_float(c.arv) * flip_rate) - _as_float(c.rehab) - _as_float(c.closing_costs))
-            short_sale[c.id] = bool(liens_total and (wholesale_offer < liens_total or flip_offer < liens_total))
-
-    
-    # Skip Trace present (exists row in case_skiptrace)
-    skiptrace_present = {}
-    try:
-        if cases:
-            case_ids = [c.id for c in cases]
-            # SQLite-friendly IN clause
-            placeholders = ",".join([":id" + str(i) for i in range(len(case_ids))])
-            params = {"id"+str(i): case_ids[i] for i in range(len(case_ids))}
-            rows = db.execute(text(f"SELECT case_id FROM case_skiptrace WHERE case_id IN ({placeholders})"), params).fetchall()
-            for (cid,) in rows:
-                skiptrace_present[int(cid)] = True
-    except Exception as e:
-        logger.warning("cases_list: could not compute skiptrace_present: %s", e)
-
-    return templates.TemplateResponse(
-        "cases_list.html",
-        {
-            "request": request,
-            "cases": cases,   # ✅ now defined
-            "pagination": pagination,
-            "show_archived": bool(show_archived_int),
-            "show_new": bool(show_new_int),
-            "search_query": case,
-            "tag_filter": tag,
-            "tag_options": list(tag_map.keys()),
-            "page_size": page_size,
-            "sort_by": sort_by,
-            "sort_order": sort_order,
-            "defendants_count": defendants_count,
-            "notes_count": notes_count,
-            "docs_present": docs_present,
-            "skiptrace_present": skiptrace_present,
-            "quick_flags": quick_flags,
-            "short_sale": short_sale,
-            "current_user": get_current_user(request),
-        },
-    )
 
 
 
-@app.post("/cases/archive")
-def archive_cases(
-    request: Request,
-    ids: List[int] = Form(default=[]),
-    show_archived: int = Form(0),
-    db: Session = Depends(get_db),
-):
-    if ids:
-        db.execute(
-            text("UPDATE cases SET archived = 1 WHERE id IN :ids")
-            .bindparams(bindparam("ids", expanding=True)),
-            {"ids": ids},
-        )
-        db.commit()
-    return RedirectResponse(url="/cases?show_archived=0&page=1", status_code=303)
 
 
-@app.post("/cases/export")
-def export_cases(
-    request: Request,
-    ids: List[int] = Form(default=[]),
-    show_archived: int = Form(0),
-    case: str = Form("", alias="case"),
-    db: Session = Depends(get_db),
-):
-    qry = db.query(Case)
-
-    if not show_archived:
-        qry = qry.filter(text("(archived IS NULL OR archived = 0)"))
-
-    if case:
-        qry = qry.filter(Case.case_number.contains(case))
-    if ids:
-        qry = qry.filter(Case.id.in_(ids))
-
-    header = [
-        "id",
-        "case_number",
-        "filing_datetime",
-        "style",
-        "address",
-        "arv",
-        "closing_costs",
-        "current_deed_path",
-        "defendants",
-        "mortgage_path",
-        "notes_count",
-        "outstanding_liens",
-        "parcel_id",
-        "previous_deed_path",
-        "rehab",
-        "value_calc_path",
-        "verified_complaint_path",
-        "skiptrace_owner_name",
-        "skiptrace_property_address",
-        "skiptrace_phones",
-        "skiptrace_emails",
-    ]
-
-    buf = io.StringIO()
-    writer = _csv.writer(buf, lineterminator="\n")
-    writer.writerow(header)
-
-    rows = qry.order_by(Case.filing_datetime.desc()).all()
-    for c in rows:
-        try:
-            defendants = [d.name for d in c.defendants] if getattr(c, "defendants", None) else []
-        except Exception:
-            defendants = []
-        try:
-            notes_count = len(c.notes) if getattr(c, "notes", None) else 0
-        except Exception:
-            notes_count = 0
-
-        address = (getattr(c, "address_override", None) or getattr(c, "address", "") or "").strip()
-        outstanding = getattr(c, "outstanding_liens", None) or "[]"
-
-        skip = load_skiptrace_for_case(c.id)
-        skip_owner = ""
-        skip_addr = ""
-        skip_phones = []
-        skip_emails = []
-        try:
-            if skip and skip.get("results"):
-                result = skip["results"][0] or {}
-                person = (result.get("persons") or [{}])[0] or {}
-                prop_addr = result.get("propertyAddress") or {}
-                skip_owner = person.get("full_name") or ""
-                skip_addr = " ".join(
-                    p for p in [
-                        prop_addr.get("street"),
-                        prop_addr.get("city"),
-                        prop_addr.get("state"),
-                        prop_addr.get("postalCode"),
-                    ] if p
-                ).strip()
-                for ph in person.get("phones") or []:
-                    num = ph.get("number")
-                    if num:
-                        skip_phones.append(num)
-                for em in person.get("emails") or []:
-                    addr = em.get("email")
-                    if addr:
-                        skip_emails.append(addr)
-        except Exception:
-            pass
-
-        writer.writerow([
-            c.id,
-            c.case_number or "",
-            c.filing_datetime or "",
-            c.style or "",
-            address,
-            getattr(c, "arv", "") or "",
-            getattr(c, "closing_costs", "") or "",
-            getattr(c, "current_deed_path", "") or "",
-            json.dumps(defendants),
-            getattr(c, "mortgage_path", "") or "",
-            notes_count,
-            outstanding,
-            c.parcel_id or "",
-            getattr(c, "previous_deed_path", "") or "",
-            getattr(c, "rehab", "") or "",
-            getattr(c, "value_calc_path", "") or "",
-            getattr(c, "verified_complaint_path", "") or "",
-            skip_owner,
-            skip_addr,
-            ";".join(skip_phones),
-            ";".join(skip_emails),
-        ])
-
-    buf.seek(0)
-    filename = f"cases_export_{_dt.datetime.now().strftime('%Y-%m-%d')}.csv"
-    return StreamingResponse(
-        iter([buf.getvalue()]),
-        media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
-    )
 
 
-@app.post("/cases/export_crm")
-def export_cases_crm(
-    request: Request,
-    ids: List[int] = Form(default=[]),
-    show_archived: int = Form(0),
-    case: str = Form("", alias="case"),
-    db: Session = Depends(get_db),
-):
-    qry = db.query(Case)
-
-    if not show_archived:
-        qry = qry.filter(text("(archived IS NULL OR archived = 0)"))
-
-    if case:
-        qry = qry.filter(Case.case_number.contains(case))
-    if ids:
-        qry = qry.filter(Case.id.in_(ids))
-
-    header = [
-        "STATUS",
-        "TAGS",
-        "CONTACT_TYPES",
-        "MOTIVATION_LEVEL",
-        "NAME",
-        "FIRST_NAME",
-        "LAST_NAME",
-        "EMAIL",
-        "PHONE_1_NUMBER",
-        "PHONE_1_PHONE_TYPE",
-        "PHONE_1_DESCRIPTION",
-        "PHONE_1_DO_NOT_CALL",
-        "PHONE_1_CONSENT_GIVEN",
-        "PHONE_2_NUMBER",
-        "PHONE_2_PHONE_TYPE",
-        "PHONE_2_DESCRIPTION",
-        "PHONE_2_DO_NOT_CALL",
-        "PHONE_2_CONSENT_GIVEN",
-        "PHONE_3_NUMBER",
-        "PHONE_3_PHONE_TYPE",
-        "PHONE_3_DESCRIPTION",
-        "PHONE_3_DO_NOT_CALL",
-        "PHONE_3_CONSENT_GIVEN",
-        "MAILING_ADDRESS",
-        "MAILING_STREET_ADDRESS",
-        "MAILING_CITY",
-        "MAILING_STATE",
-        "MAILING_ZIP",
-        "COMPANY_NAME",
-        "COMPANY_ADDRESS",
-        "PROPERTY_FULL_ADDRESS",
-        "PROPERTY_STREET_ADDRESS",
-        "PROPERTY_CITY",
-        "PROPERTY_STATE",
-        "PROPERTY_ZIP",
-        "PROPERTY_COUNTY",
-        "PROPERTY_APN",
-        "PROPERTY_LEGAL_DESCRIPTION",
-        "PROPERTY_FULL_ADDRESS_MAP_URL",
-        "PROPERTY_OCCUPANCY",
-        "PROPERTY_BEDROOMS",
-        "PROPERTY_BATHROOMS",
-        "PROPERTY_SQFT",
-        "PROPERTY_LOT_SIZE_SQFT",
-        "PROPERTY_YEAR",
-        "PROPERTY_NOTES",
-        "OWNER_IS_ABSENTEE",
-        "OWNER_2_FULL_NAME",
-        "OWNER_2_LAST_NAME",
-        "OWNER_2_MIDDLE_NAME",
-        "OWNER_2_FIRST_NAME",
-        "OWNER_2_ADDRESS",
-        "OWNER_2_PHONE",
-        "OWNER_2_EMAIL",
-        "OWNER_2_NOTES",
-        "OWNER_2_IS_SPOUSE",
-        "SPOUSE_NAME",
-        "SPOUSE_MAILING_ADDRESS",
-        "SPOUSE_EMAIL",
-        "SPOUSE_PHONE",
-        "SPOUSE_NOTES",
-        "PROPERTY_VALUE",
-        "PROPERTY_EQUITY",
-        "PROPERTY_REPAIR_ESTIMATE",
-        "PROPERTY_LAST_SALE_AMOUNT",
-        "PROPERTY_LAST_SALE_DT",
-        "PROPERTY_LAST_SALE_IS_CASH",
-        "OFFER_AMOUNT",
-        "OFFER_CONTRACT_DT",
-        "OFFER_ACCEPTED_DT",
-        "OFFER_REJECTED_DT",
-        "OFFER_NOTES",
-        "OFFER_UPLOAD_ID",
-        "PROPERTY_IS_LISTED",
-        "PROPERTY_LISTED_DT",
-        "PROPERTY_LISTING_URL",
-        "PROPERTY_LISTING_AGT_NAME",
-        "PROPERTY_LISTING_AGT_PHONE",
-        "PROPERTY_LISTING_AGT_EMAIL",
-        "PROPERTY_LISTING_AMOUNT",
-        "PROPERTY_LISTING_NOTES",
-        "NEEDS_SALE_BY_DT",
-        "REASON_FOR_SELLING",
-        "PROPERTY_SELLER_LOWEST_AMOUNT",
-        "PROPERTY_SELLER_ESTIMATED_VALUE",
-        "PROPERTY_SELLER_VALUE_RATIONALE",
-        "MOTIVATION_NOTES",
-        "MORTGAGE_BANK_NAME",
-        "MORTGAGE_BANK_CONTACT_NAME",
-        "MORTGAGE_BANK_CONTACT_EMAIL",
-        "MORTGAGE_BANK_CONTACT_PHONE",
-        "MORTGAGE_PAYMENT_ADDRESS",
-        "MORTGAGE_AMOUNT_MONTHLY",
-        "MORTGAGE_AMOUNT_REMAINING",
-        "MORTGAGE_BEHIND_MONTHS",
-        "MORTGAGE_BEHIND_AMOUNT",
-        "MORTGAGE_BANK_NOTES",
-        "FORECLOSURE_DEFAULT_AMOUNT",
-        "FORECLOSURE_ATTORNEY_NAME",
-        "FORECLOSURE_CASE_NUMBER",
-        "FORECLOSURE_DOCUMENT_NUMBER",
-        "FORECLOSURE_DOCUMENT_TYPE",
-        "FORECLOSURE_EFFECTIVE_DT",
-        "FORECLOSURE_LENDER_ADDRESS",
-        "FORECLOSURE_LENDER_NAME",
-        "FORECLOSURE_LIEN_POSITION",
-        "FORECLOSURE_ORIGINAL_DOCUMENT_NUM",
-        "FORECLOSURE_ORIGINAL_LENDER",
-        "FORECLOSURE_ORIGINAL_MORTGAGE_AMT",
-        "FORECLOSURE_ORIGINAL_RECORDING_DT",
-        "FORECLOSURE_PLAINTIFF",
-        "FORECLOSURE_RECENT_ADDED_DT",
-        "FORECLOSURE_RECORDING_DT",
-        "FORECLOSURE_TRUSTEE_NAME",
-        "FORECLOSURE_TRUSTEE_ADDRESS",
-        "FORECLOSURE_TRUSTEE_SALE_NUMBER",
-        "FORECLOSURE_UNPAID_BALANCE",
-        "FORECLOSURE_NOTES",
-        "REPRESENTATIVE_NAME",
-        "REPRESENTATIVE_ADDRESS",
-        "REPRESENTATIVE_PHONE",
-        "REPRESENTATIVE_EMAIL",
-        "REPRESENTATIVE_NOTES",
-        "ATTORNEY_NAME",
-        "ATTORNEY_ADDRESS",
-        "ATTORNEY_PHONE",
-        "ATTORNEY_EMAIL",
-        "ATTORNEY_NOTES",
-        "NOTES",
-    ]
-
-    def _split_name(full: str) -> tuple[str, str]:
-        parts = [p for p in (full or "").split() if p]
-        if not parts:
-            return "", ""
-        if len(parts) == 1:
-            return parts[0], ""
-        return parts[0], parts[-1]
-
-    def _stringify(val: object) -> str:
-        if val is None:
-            return ""
-        return str(val)
-
-    rows = qry.order_by(Case.filing_datetime.desc()).all()
-    buf = io.StringIO()
-    writer = _csv.writer(buf, lineterminator="\n")
-    writer.writerow(header)
-
-    for c in rows:
-        skip = load_skiptrace_for_case(c.id)
-        owner_name = ""
-        email = ""
-        phones = []
-        mailing = {}
-
-        if skip and skip.get("results"):
-            result = skip["results"][0] or {}
-            person = (result.get("persons") or [{}])[0] or {}
-            owner_name = person.get("full_name") or ""
-            for ph in person.get("phones") or []:
-                num = ph.get("number")
-                if num:
-                    phones.append({"number": num, "type": ph.get("type") or ""})
-            for em in person.get("emails") or []:
-                addr = em.get("email")
-                if addr:
-                    email = addr
-                    break
-            mailing = result.get("propertyAddress") or {}
-
-        first_name, last_name = _split_name(owner_name)
-
-        prop = load_property_for_case(c.id) or {}
-        props = (prop.get("results") or {}).get("properties") or []
-        p = props[0] if props else {}
-        addr = p.get("address") or {}
-        listing = p.get("listing") or {}
-        general = p.get("general") or {}
-        building = p.get("building") or {}
-        lot = p.get("lot") or {}
-        quick = p.get("quickLists") or {}
-
-        ov_raw = getattr(c, "property_overrides", "") or "{}"
-        try:
-            ov = json.loads(ov_raw) if isinstance(ov_raw, str) else {}
-        except Exception:
-            ov = {}
-
-        prop_street = (c.address_override or c.address or addr.get("street") or addr.get("streetNoUnit") or "").strip()
-        prop_city = (addr.get("city") or "").strip()
-        prop_state = (addr.get("state") or "").strip()
-        prop_zip = (addr.get("zip") or "").strip()
-        prop_county = (addr.get("county") or "").strip()
-
-        sqft = ov.get("sqft") or building.get("livingAreaSqft") or general.get("buildingAreaSqft") or listing.get("totalBuildingAreaSquareFeet")
-        lot_sqft = lot.get("lotSizeSqft") or listing.get("lotSizeSquareFeet") or ""
-        year_built = ov.get("year_built") or general.get("yearBuilt") or p.get("yearBuilt") or listing.get("yearBuilt")
-        beds = ov.get("beds") or building.get("bedrooms") or listing.get("bedroomCount") or ""
-        baths = ov.get("baths") or building.get("totalBathrooms") or listing.get("bathroomCount") or ""
-
-        tags = []
-        if quick.get("ownerOccupied"):
-            tags.append("Owner Occupied")
-        if quick.get("highEquity"):
-            tags.append("High Equity")
-        if quick.get("freeAndClear"):
-            tags.append("Free & Clear")
-        if quick.get("absenteeOwner"):
-            tags.append("Absentee Owner")
-        if quick.get("preforeclosure"):
-            tags.append("Pre-foreclosure")
-        if quick.get("taxDefault"):
-            tags.append("Tax Default")
-        if quick.get("vacant"):
-            tags.append("Vacant")
-        if quick.get("hasHoa"):
-            tags.append("Has HOA")
-
-        phones += [{"number": "", "type": ""}] * (3 - len(phones))
-
-        writer.writerow([
-            "New",
-            ";".join(tags),
-            "",
-            "",
-            owner_name,
-            first_name,
-            last_name,
-            email,
-            _stringify(phones[0]["number"]),
-            _stringify(phones[0]["type"]),
-            "",
-            "",
-            "",
-            _stringify(phones[1]["number"]),
-            _stringify(phones[1]["type"]),
-            "",
-            "",
-            "",
-            _stringify(phones[2]["number"]),
-            _stringify(phones[2]["type"]),
-            "",
-            "",
-            "",
-            " ".join(p for p in [mailing.get("street"), mailing.get("city"), mailing.get("state"), mailing.get("postalCode")] if p),
-            _stringify(mailing.get("street")),
-            _stringify(mailing.get("city")),
-            _stringify(mailing.get("state")),
-            _stringify(mailing.get("postalCode")),
-            "",
-            "",
-            " ".join(p for p in [prop_street, prop_city, prop_state, prop_zip] if p),
-            prop_street,
-            prop_city,
-            prop_state,
-            prop_zip,
-            prop_county,
-            getattr(c, "parcel_id", "") or "",
-            "",
-            "",
-            "",
-            _stringify(beds),
-            _stringify(baths),
-            _stringify(sqft),
-            _stringify(lot_sqft),
-            _stringify(year_built),
-            "",
-            "true" if quick.get("absenteeOwner") else "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            _stringify(ov.get("estimated_value") or ""),
-            "",
-            _stringify(getattr(c, "rehab", "") or ""),
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-            "",
-        ])
-
-    buf.seek(0)
-    filename = f"crm_export_{_dt.datetime.now().strftime('%Y-%m-%d')}.csv"
-    return StreamingResponse(
-        iter([buf.getvalue()]),
-        media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
 
 
 # =====================
@@ -3380,228 +1638,13 @@ def _ensure_archived_column_v107():
         logger.warning("Could not ensure 'archived' column: %s", e)
 
 
-@app.post("/cases/unarchive")
-def unarchive_cases(
-    request: Request,
-    ids: List[int] = Form(default=[]),
-    show_archived: int = Form(0),
-    db: Session = Depends(get_db),
-):
-    if ids:
-        db.execute(
-            text("UPDATE cases SET archived = 0 WHERE id IN :ids")
-            .bindparams(bindparam("ids", expanding=True)),
-            {"ids": ids},
-        )
-        db.commit()
-    return RedirectResponse(url=f"/cases?show_archived={show_archived}&page=1", status_code=303)
 
 
-@app.post("/cases/archive_async")
-def archive_cases_async(
-    ids: List[int] = Form(default=[]),
-    db: Session = Depends(get_db),
-):
-    if not ids:
-        return {"ok": True, "updated": 0}
-    db.execute(
-        text("UPDATE cases SET archived = 1 WHERE id IN :ids")
-        .bindparams(bindparam("ids", expanding=True)),
-        {"ids": ids},
-    )
-    db.commit()
-    return {"ok": True, "updated": len(ids)}
 
 
-@app.post("/cases/unarchive_async")
-def unarchive_cases_async(
-    ids: List[int] = Form(default=[]),
-    db: Session = Depends(get_db),
-):
-    if not ids:
-        return {"ok": True, "updated": 0}
-    db.execute(
-        text("UPDATE cases SET archived = 0 WHERE id IN :ids")
-        .bindparams(bindparam("ids", expanding=True)),
-        {"ids": ids},
-    )
-    db.commit()
-    return {"ok": True, "updated": len(ids)}
-@app.post("/cases/{case_id}/property/update-owner")
-async def update_property_owner(
-    request: Request,
-    case_id: int,
-):
-    """Update owner information - multiple names, shared address"""
-    try:
-        from app.services.skiptrace_service import load_property_for_case
-        import json
-        
-        # Get form data
-        form_data = await request.form()
-        owner_count = int(form_data.get("owner_count", 1))
-        
-        property_payload = load_property_for_case(case_id)
-        
-        if property_payload and property_payload.get("results"):
-            if "properties" in property_payload["results"] and len(property_payload["results"]["properties"]) > 0:
-                prop = property_payload["results"]["properties"][0]
-                
-                # Shared mailing address (same for all owners)
-                shared_address = {
-                    "street": form_data.get("mailing_street", ""),
-                    "city": form_data.get("mailing_city", ""),
-                    "state": form_data.get("mailing_state", ""),
-                    "zipCode": form_data.get("mailing_zip", ""),
-                    "county": form_data.get("mailing_county", ""),
-                }
-                
-                if owner_count > 1:
-                    # Multiple owners - create array with shared address
-                    owners_array = []
-                    
-                    for i in range(1, owner_count + 1):
-                        owner_name = form_data.get(f"owner_name_{i}", "")
-                        if owner_name:  # Only add if name is not empty
-                            owners_array.append({
-                                "fullName": owner_name,
-                                "name": owner_name,
-                                "mailingAddress": shared_address.copy()
-                            })
-                    
-                    # Store as array
-                    prop["owner"] = owners_array
-                    
-                else:
-                    # Single owner
-                    owner_name = form_data.get("owner_name_1", "")
-                    
-                    prop["owner"] = {
-                        "fullName": owner_name,
-                        "name": owner_name,
-                        "mailingAddress": shared_address
-                    }
-                
-                # Save back to database
-                with engine.begin() as conn:
-                    conn.execute(
-                        text("""
-                            UPDATE case_property 
-                            SET raw_json = :json
-                            WHERE case_id = :case_id
-                        """),
-                        {"case_id": case_id, "json": json.dumps(property_payload)}
-                    )
-                
-                logger.info(f"Updated {owner_count} owner(s) for case {case_id}")
-    
-    except Exception as exc:
-        logger.error(f"Failed to update owner info: {exc}")
-    
-    return RedirectResponse(url=f"/cases/{case_id}", status_code=303)
-
-@app.post("/cases/{case_id}/property/update-valuation")
-async def update_property_valuation(
-    request: Request,
-    case_id: int,
-    estimated_value: Optional[float] = Form(None),
-    as_of_date: str = Form(""),
-    confidence_score: Optional[float] = Form(None),
-    equity_percent: Optional[float] = Form(None),
-    ltv: Optional[float] = Form(None),
-):
-    """Update valuation information"""
-    try:
-        from app.services.skiptrace_service import load_property_for_case
-        import json
-        
-        property_payload = load_property_for_case(case_id)
-        
-        if property_payload and property_payload.get("results"):
-            if "properties" in property_payload["results"] and len(property_payload["results"]["properties"]) > 0:
-                prop = property_payload["results"]["properties"][0]
-                
-                if "valuation" not in prop:
-                    prop["valuation"] = {}
-                
-                prop["valuation"].update({
-                    "estimatedValue": estimated_value,
-                    "asOfDate": as_of_date,
-                    "confidenceScore": confidence_score,
-                    "equityPercent": equity_percent,
-                    "ltv": ltv,
-                })
-                
-                with engine.begin() as conn:
-                    conn.execute(
-                        text("""
-                            UPDATE case_property 
-                            SET raw_json = :json
-                            WHERE case_id = :case_id
-                        """),
-                        {"case_id": case_id, "json": json.dumps(property_payload)}
-                    )
-                
-                logger.info(f"Updated valuation for case {case_id}")
-    
-    except Exception as exc:
-        logger.error(f"Failed to update valuation: {exc}")
-    
-    return RedirectResponse(url=f"/cases/{case_id}", status_code=303)
 
 
-@app.post("/cases/{case_id}/property/update-demographics")
-async def update_property_demographics(
-    request: Request,
-    case_id: int,
-    age: Optional[int] = Form(None),
-    gender: str = Form(""),
-    marital_status: str = Form(""),
-    child_count: Optional[int] = Form(None),
-    income: Optional[float] = Form(None),
-    net_worth: Optional[float] = Form(None),
-    occupation: str = Form(""),
-):
-    """Update demographics information"""
-    try:
-        from app.services.skiptrace_service import load_property_for_case
-        import json
-        
-        property_payload = load_property_for_case(case_id)
-        
-        if property_payload and property_payload.get("results"):
-            if "properties" in property_payload["results"] and len(property_payload["results"]["properties"]) > 0:
-                prop = property_payload["results"]["properties"][0]
-                
-                if "demographics" not in prop:
-                    prop["demographics"] = {}
-                
-                prop["demographics"].update({
-                    "age": age,
-                    "gender": gender,
-                    "maritalStatus": marital_status,
-                    "childCount": child_count,
-                    "income": income,
-                    "netWorth": net_worth,
-                    "individualOccupation": occupation,
-                })
-                
-                with engine.begin() as conn:
-                    conn.execute(
-                        text("""
-                            UPDATE case_property 
-                            SET raw_json = :json
-                            WHERE case_id = :case_id
-                        """),
-                        {"case_id": case_id, "json": json.dumps(property_payload)}
-                    )
-                
-                logger.info(f"Updated demographics for case {case_id}")
-    
-    except Exception as exc:
-        logger.error(f"Failed to update demographics: {exc}")
-    
-    return RedirectResponse(url=f"/cases/{case_id}", status_code=303)
+
 @app.get("/debug/owners/{case_id}")
 async def debug_owners(
     case_id: int,

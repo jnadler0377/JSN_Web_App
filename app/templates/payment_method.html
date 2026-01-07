@@ -1,0 +1,346 @@
+{% extends "base.html" %}
+{% block title %}Payment Method - JSN Holdings{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">Payment Method</h1>
+        <p class="page-subtitle">Add or update your payment method to claim cases.</p>
+    </div>
+    <a href="/billing" class="btn btn-ghost">← Back to Billing</a>
+</div>
+
+<!-- Current Payment Method -->
+<div class="card" style="max-width: 600px; margin-bottom: var(--space-xl);">
+    <div class="card-header">
+        <h3 class="card-title">Current Payment Method</h3>
+    </div>
+    <div class="card-body" id="current-method">
+        <div style="text-align: center; padding: 24px; color: var(--text-muted);">
+            Loading...
+        </div>
+    </div>
+</div>
+
+<!-- Add/Update Payment Method -->
+<div class="card" style="max-width: 600px;">
+    <div class="card-header">
+        <h3 class="card-title" id="form-title">Add Payment Method</h3>
+    </div>
+    <div class="card-body">
+        <div id="stripe-not-configured" style="display: none; text-align: center; padding: 24px;">
+            <span style="font-size: 48px; display: block; margin-bottom: 12px;">ℹ️</span>
+            <h3>Payment System Not Configured</h3>
+            <p style="color: var(--text-muted); margin-bottom: 16px;">
+                Stripe payment processing has not been set up yet.
+            </p>
+            <div style="background: var(--success-light); padding: 16px; border-radius: var(--radius-md); margin-bottom: 16px;">
+                <strong style="color: var(--success);">✓ You can still claim cases!</strong>
+                <p style="margin: 8px 0 0 0; color: var(--text-secondary);">
+                    While payment processing is being set up, you can claim cases without a payment method.
+                </p>
+            </div>
+            <a href="/cases" class="btn btn-primary">← Back to Cases</a>
+        </div>
+        
+        <form id="payment-form" style="display: none;">
+            <div class="form-group">
+                <label class="form-label">Card Information</label>
+                <div id="card-element" style="padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg);"></div>
+                <div id="card-errors" style="color: var(--danger); font-size: 14px; margin-top: 8px;"></div>
+            </div>
+            
+            <div style="display: flex; gap: 12px; margin-top: var(--space-lg);">
+                <button type="submit" class="btn btn-primary" id="submit-btn">
+                    <span id="btn-text">Save Payment Method</span>
+                    <span id="btn-spinner" style="display: none;">
+                        <svg class="spinner" width="20" height="20" viewBox="0 0 24 24">
+                            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="31.4" stroke-linecap="round">
+                                <animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="1s" repeatCount="indefinite"/>
+                            </circle>
+                        </svg>
+                        Processing...
+                    </span>
+                </button>
+                <button type="button" class="btn btn-ghost" onclick="window.location.href='/billing'">Cancel</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Info Box -->
+<div style="max-width: 600px; margin-top: var(--space-xl); padding: var(--space-lg); background: var(--info-light); border-radius: var(--radius-md); border-left: 4px solid var(--info);">
+    <strong style="color: var(--info);">ℹ️ How Billing Works</strong>
+    <ul style="margin: 12px 0 0 0; padding-left: 20px; color: var(--text-secondary);">
+        <li>Your card is charged when you claim cases</li>
+        <li>Each case is priced based on its deal score ($1-$100)</li>
+        <li>Invoices are generated daily and charged automatically</li>
+        <li>You can view all charges in your billing history</li>
+    </ul>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://js.stripe.com/v3/"></script>
+<script>
+let stripe = null;
+let elements = null;
+let cardElement = null;
+
+document.addEventListener('DOMContentLoaded', async function() {
+    await loadPaymentStatus();
+    await initStripe();
+});
+
+async function loadPaymentStatus() {
+    try {
+        const response = await fetch('/api/v3/payment/status');
+        if (!response.ok) throw new Error('Failed to load status');
+        
+        const data = await response.json();
+        const container = document.getElementById('current-method');
+        
+        if (data.payment_method) {
+            container.innerHTML = `
+                <div style="display: flex; align-items: center; justify-content: space-between;">
+                    <div style="display: flex; align-items: center; gap: 16px;">
+                        <div style="font-size: 32px;">${getCardIcon(data.payment_method.brand)}</div>
+                        <div>
+                            <div style="font-weight: 600;">${data.payment_method.display}</div>
+                            <div style="font-size: 14px; color: var(--text-muted);">
+                                Expires ${data.payment_method.exp_month}/${data.payment_method.exp_year}
+                            </div>
+                        </div>
+                    </div>
+                    <button class="btn btn-ghost btn-sm" onclick="removePaymentMethod()">Remove</button>
+                </div>
+                <div style="margin-top: 16px; padding: 12px; background: var(--success-light); border-radius: var(--radius-md);">
+                    <span style="color: var(--success);">✓ You can claim cases</span>
+                </div>
+            `;
+            document.getElementById('form-title').textContent = 'Update Payment Method';
+        } else {
+            container.innerHTML = `
+                <div style="text-align: center; padding: 24px;">
+                    <span style="font-size: 48px; display: block; margin-bottom: 12px;">💳</span>
+                    <p style="color: var(--text-muted); margin: 0;">No payment method on file</p>
+                    <div style="margin-top: 16px; padding: 12px; background: var(--warning-light); border-radius: var(--radius-md);">
+                        <span style="color: #b45309;">⚠️ Add a payment method to claim cases</span>
+                    </div>
+                </div>
+            `;
+            document.getElementById('form-title').textContent = 'Add Payment Method';
+        }
+        
+        if (!data.stripe_configured) {
+            document.getElementById('stripe-not-configured').style.display = 'block';
+            document.getElementById('payment-form').style.display = 'none';
+        }
+        
+    } catch (error) {
+        console.error('Error loading payment status:', error);
+    }
+}
+
+async function initStripe() {
+    try {
+        // Get Stripe config
+        const configResponse = await fetch('/api/v3/payment/config');
+        const config = await configResponse.json();
+        
+        if (!config.configured || !config.publishable_key) {
+            document.getElementById('stripe-not-configured').style.display = 'block';
+            return;
+        }
+        
+        // Initialize Stripe
+        stripe = Stripe(config.publishable_key);
+        elements = stripe.elements();
+        
+        // Create card element
+        cardElement = elements.create('card', {
+            style: {
+                base: {
+                    fontSize: '16px',
+                    color: '#1a1a2e',
+                    '::placeholder': { color: '#6b7280' },
+                },
+                invalid: {
+                    color: '#dc2626',
+                },
+            },
+        });
+        
+        cardElement.mount('#card-element');
+        
+        // Handle errors
+        cardElement.on('change', function(event) {
+            const displayError = document.getElementById('card-errors');
+            if (event.error) {
+                displayError.textContent = event.error.message;
+            } else {
+                displayError.textContent = '';
+            }
+        });
+        
+        // Show form
+        document.getElementById('payment-form').style.display = 'block';
+        
+        // Handle form submission
+        document.getElementById('payment-form').addEventListener('submit', handleSubmit);
+        
+    } catch (error) {
+        console.error('Error initializing Stripe:', error);
+        document.getElementById('stripe-not-configured').style.display = 'block';
+    }
+}
+
+async function handleSubmit(event) {
+    event.preventDefault();
+    
+    const submitBtn = document.getElementById('submit-btn');
+    const btnText = document.getElementById('btn-text');
+    const btnSpinner = document.getElementById('btn-spinner');
+    
+    submitBtn.disabled = true;
+    btnText.style.display = 'none';
+    btnSpinner.style.display = 'inline-flex';
+    
+    try {
+        // Create SetupIntent
+        const setupResponse = await fetch('/api/v3/payment/setup-intent', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+        });
+        
+        if (!setupResponse.ok) {
+            const error = await setupResponse.json();
+            throw new Error(error.detail || 'Failed to create setup');
+        }
+        
+        const setupData = await setupResponse.json();
+        
+        // Confirm card setup with Stripe
+        const { setupIntent, error } = await stripe.confirmCardSetup(
+            setupData.client_secret,
+            {
+                payment_method: {
+                    card: cardElement,
+                },
+            }
+        );
+        
+        if (error) {
+            throw new Error(error.message);
+        }
+        
+        // Save payment method to our backend
+        const saveResponse = await fetch('/api/v3/payment/save-method', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                payment_method_id: setupIntent.payment_method,
+            }),
+        });
+        
+        if (!saveResponse.ok) {
+            const error = await saveResponse.json();
+            throw new Error(error.detail || 'Failed to save payment method');
+        }
+        
+        // Success! Reload page
+        showToast('Payment method saved successfully!', 'success');
+        setTimeout(() => window.location.reload(), 1500);
+        
+    } catch (error) {
+        console.error('Error:', error);
+        document.getElementById('card-errors').textContent = error.message;
+        
+        submitBtn.disabled = false;
+        btnText.style.display = 'inline';
+        btnSpinner.style.display = 'none';
+    }
+}
+
+async function removePaymentMethod() {
+    if (!confirm('Remove your payment method? You will not be able to claim cases until you add a new one.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/v3/payment/remove-method', {
+            method: 'DELETE',
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to remove');
+        }
+        
+        showToast('Payment method removed', 'success');
+        setTimeout(() => window.location.reload(), 1000);
+        
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+function getCardIcon(brand) {
+    const icons = {
+        'Visa': '💳',
+        'Mastercard': '💳',
+        'Amex': '💳',
+        'Discover': '💳',
+    };
+    return icons[brand] || '💳';
+}
+
+function showToast(message, type) {
+    // Simple toast notification
+    const toast = document.createElement('div');
+    toast.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        padding: 16px 24px;
+        background: ${type === 'success' ? 'var(--success)' : 'var(--danger)'};
+        color: white;
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-lg);
+        z-index: 9999;
+        animation: slideIn 0.3s ease;
+    `;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    
+    setTimeout(() => {
+        toast.style.animation = 'slideOut 0.3s ease';
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
+}
+</script>
+
+<style>
+@keyframes slideIn {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+@keyframes slideOut {
+    from { transform: translateX(0); opacity: 1; }
+    to { transform: translateX(100%); opacity: 0; }
+}
+.spinner {
+    animation: spin 1s linear infinite;
+}
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+#btn-spinner {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+</style>
+{% endblock %}
